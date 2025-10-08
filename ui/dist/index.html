@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <title>A-Frame Car + Follow Cam (Arcade + Friction)</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <!-- ▼ 一元パラメータ（ここだけ触ればOK） ▼ -->
+    <script>
+      window.PARAMS = {
+        scene: { driver: 'local', debug: true, gravity: -9.8 },
+        body: { shape: 'box', type: 'dynamic', mass: 120, linearDamping: 0.1, angularDamping: 1.0 },
+        carDrive: {
+          forwardSign: +1,
+          maxSpeed: 25,
+          accel: 3,
+          brake: 4,
+          coastDecel: 0.05,
+          yawRate: 3.2,
+          yawSlew: 40,
+          deadbandV: 0.05,
+          deadbandW: 0.02,
+          muRoll: 0.005,
+          airLin: 0.1,
+          airQuad: 0.1,
+        },
+        chaseCam: { dist: -3, height: 3.5, stiffness: 12, lookAhead: 0.45 },
+        angularFactor: { x: 0, y: 1, z: 0 },
+      };
+
+      function applyParams() {
+        const P = window.PARAMS;
+        const scene = document.querySelector('a-scene');
+        if (scene) {
+          scene.setAttribute(
+            'physics',
+            `driver: ${P.scene.driver}; debug: ${P.scene.debug}; gravity: ${P.scene.gravity}`
+          );
+        }
+        const car = document.querySelector('#car');
+        if (car) {
+          car.setAttribute(
+            'dynamic-body',
+            `shape: ${P.body.shape}; mass: ${P.body.mass}; linearDamping: ${P.body.linearDamping}; angularDamping: ${P.body.angularDamping}; type: ${P.body.type}`
+          );
+          car.setAttribute(
+            'car-drive',
+            `forwardSign:${P.carDrive.forwardSign}; maxSpeed:${P.carDrive.maxSpeed}; accel:${P.carDrive.accel}; brake:${P.carDrive.brake}; coastDecel:${P.carDrive.coastDecel}; ` +
+              `yawRate:${P.carDrive.yawRate}; yawSlew:${P.carDrive.yawSlew}; deadbandV:${P.carDrive.deadbandV}; deadbandW:${P.carDrive.deadbandW}; ` +
+              `muRoll:${P.carDrive.muRoll}; airLin:${P.carDrive.airLin}; airQuad:${P.carDrive.airQuad}`
+          );
+        }
+        const chase = document.querySelector('#chasecam');
+        if (chase) {
+          chase.setAttribute(
+            'chase-camera',
+            `target: #car; dist: ${P.chaseCam.dist}; height: ${P.chaseCam.height}; stiffness: ${P.chaseCam.stiffness}; lookAhead: ${P.chaseCam.lookAhead}`
+          );
+        }
+        console.log('[PARAMS] applied:', P);
+      }
+
+      document.addEventListener('DOMContentLoaded', () => {
+        const sceneEl = document.querySelector('a-scene');
+        if (sceneEl) {
+          if (sceneEl.hasLoaded) applyParams();
+          else sceneEl.addEventListener('loaded', applyParams, { once: true });
+        }
+      });
+    </script>
+    <!-- ▲ 一元パラメータ ▲ -->
+    <!-- ▼ 車の軌跡表示用カスタムコンポーネント (箱オブジェクト版) ▼ -->
+    <!-- ▲ 車の軌跡表示用カスタムコンポーネント (箱オブジェクト版) ▲ -->
+
+    <style>
+      #eStopButton {
+        position: absolute;
+        top: 10px;
+        right: 10px;
+        z-index: 1000;
+      }
+      #netStatusPanel {
+        position: absolute;
+        top: 10px;
+        left: 10px;
+        padding: 8px 12px;
+        border-radius: 10px;
+        background: rgba(15, 18, 30, 0.82);
+        color: #f8fafc;
+        font-size: 12px;
+        line-height: 1.4;
+        min-width: 240px;
+        z-index: 1000;
+        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+      }
+      #netStatusLabel {
+        font-weight: 700;
+        margin-bottom: 4px;
+      }
+      #netStatusLabel[data-level='connected'] {
+        color: #22c55e;
+      }
+      #netStatusLabel[data-level='degraded'] {
+        color: #f97316;
+      }
+      #netStatusLabel[data-level='disconnected'] {
+        color: #ef4444;
+      }
+      #netStatusDetail {
+        opacity: 0.85;
+        margin-bottom: 4px;
+      }
+      #netMetrics {
+        opacity: 0.72;
+      }
+      #poseInfo {
+        margin-top: 4px;
+        font-family: monospace;
+      }
+      /* #logHint は削除に伴いCSSも削除 */
+    </style>
+    <script type="module" crossorigin src="/assets/index-Dqvw1MUU.js"></script>
+  </head>
+
+  <body>
+    <div id="netStatusPanel">
+      <div id="netStatusLabel" data-level="disconnected">INIT</div>
+      <div id="netStatusDetail">--</div>
+      <div id="netMetrics"></div>
+      <div id="poseInfo">pos: --</div>
+    </div>
+    <button id="eStopButton">E-Stop</button>
+    <!-- ▼ ログ関連UIは削除：DLボタン / ヒント表示 -->
+    <!-- <button id="dlLog">...</button> / <div id="logHint">...</div> を除去 -->
+
+    <a-scene physics="driver: local; debug: true; gravity: -9.8" gamepad-controls>
+      <a-assets>
+        <a-asset-item
+          id="carModel"
+          src="assets/kenney_car-kit/Models/GLB format/sedan.glb"
+        ></a-asset-item>
+      </a-assets>
+
+      <!-- ライト -->
+      <a-entity light="type: ambient; intensity: 0.6"></a-entity>
+      <a-entity light="type: directional; intensity: 1.0" position="1 3 2"></a-entity>
+
+      <!-- 追従カメラ -->
+      <a-entity
+        id="chasecam"
+        camera="active: true; near: 0.01; far: 2000; fov: 90"
+        look-controls="enabled: false"
+        chase-camera="target: #car; dist: -3; height: 3.5; stiffness: 12; lookAhead: 0.45"
+      ></a-entity>
+
+      <!-- デバッグカメラ -->
+      <a-entity
+        id="debugcam"
+        camera="active: false"
+        look-controls
+        wasd-controls
+        position="0 1.6 8"
+      ></a-entity>
+
+      <!-- 地面 & 空 -->
+      <a-plane
+        rotation="-90 0 0"
+        width="80"
+        height="80"
+        color="#ccc"
+        static-body="shape: plane"
+      ></a-plane>
+      <a-sky color="#ECECEC"></a-sky>
+
+      <!-- ポイントクラウドマップ -->
+      <a-gltf-model
+        src="assets/kenney_car-kit/MapViewer3Dpts_out_normal_white_200mm.glb"
+        rotation="-90 0 0"
+      ></a-gltf-model>
+
+      <!-- 車の軌跡を描画するエンティティ -->
+      <a-entity
+        id="trajectory"
+        track-car="target: #car; distanceThreshold: 0.1; boxWidth: 0.9; boxDepth: 0.11; boxHeight: 0.05; boxColor: #FF5733;"
+      ></a-entity>
+
+      <!-- 車 -->
+      <a-entity
+        id="car"
+        position="0 2.0 -4"
+        rotation="0 0 0"
+        dynamic-body="shape: box; mass: 120; linearDamping: 0.1; angularDamping: 1.0; type: dynamic"
+        car-drive="forwardSign:1; maxSpeed:25; accel:10; brake:12; coastDecel:0; yawRate:3.2; yawSlew:40; deadbandV:0.05; deadbandW:0.02; muRoll:0.02; airLin:0.05; airQuad:0.02"
+      >
+        <a-entity
+          id="carModelNode"
+          rotation="0 0 0"
+          gltf-model="#carModel"
+          scale="0.5 0.5 0.5"
+        ></a-entity>
+      </a-entity>
+    </a-scene>
+
+    <script>
+      // Body 調整（Yaw 以外ロック）＋ 再生成時の再適用
+      const carEl = document.querySelector('#car');
+      const applyAngularFactor = () => {
+        const b = carEl.body;
+        if (b) {
+          b.allowSleep = false;
+          const af = window.PARAMS.angularFactor || { x: 0, y: 1, z: 0 };
+          b.angularFactor.set(af.x, af.y, af.z); // pitch/roll禁止, yawのみ許可
+        }
+      };
+      carEl.addEventListener('body-loaded', applyAngularFactor, { once: true });
+      carEl.addEventListener('componentchanged', (e) => {
+        if (e.detail.name === 'dynamic-body') applyAngularFactor();
+      });
+    </script>
+  </body>
+</html>

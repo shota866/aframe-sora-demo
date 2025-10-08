@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Camera Test</title>
+    <meta charset="utf-8" />
+</head>
+<body>
+    <h1>Camera Test</h1>
+    <p>このページは、ブラウザがカメラにアクセスできるかを確認するためのテストです。</p>
+    <video id="video" width="640" height="480" autoplay playsinline></video>
+    <script>
+        async function startCamera() {
+            try {
+                // カメラ（映像のみ）にアクセスを試みる
+                const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+                const videoElement = document.getElementById('video');
+                videoElement.srcObject = stream;
+                console.log("カメラへのアクセスに成功しました。");
+            } catch (err) {
+                // エラーが発生した場合
+                console.error("カメラへのアクセス中にエラーが発生しました:", err);
+                alert("カメラにアクセスできませんでした。\nエラー名: " + err.name + "\nメッセージ: " + err.message);
+            }
+        }
+        // ページが読み込まれたらカメラを起動
+        startCamera();
+    </script>
+</body>
+</html>
