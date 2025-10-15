@@ -117,10 +117,10 @@ class KeyboardCtrlRepeater {
     if (direction !== this._lastDirection) {
       this._lastDirection = direction;
       this._notifyInput(direction ? 'direction' : 'idle', null, direction);
+      if (typeof this.onDirection === 'function') {
+        this.onDirection(direction);
+      }
     }
-    if (typeof this.onDirection !== 'function') return;
-    if (!direction) return;
-    this.onDirection(direction);
   }
 
   _currentDirection() {

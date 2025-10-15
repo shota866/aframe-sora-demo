@@ -166,6 +166,7 @@ class CtrlSender {
     };
     const ok = this.client.sendJson(this.label, message);
     if (ok && this.debug) console.debug('[ctrl] sendCtrl', message);
+    console.info('[ctrl/send] sending', { ok, message });
   }
 
   _nextSeq() {

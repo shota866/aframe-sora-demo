@@ -15,6 +15,7 @@ import logging
 import math
 import os
 import signal
+import sys
 import threading
 import time
 from dataclasses import dataclass
@@ -30,6 +31,16 @@ CTRL_DAMP_SEC = 1.0
 STATE_RATE_HZ = 30.0
 PHYSICS_RATE_HZ = 60.0
 HEARTBEAT_SEC = 1.0
+HEARTBEAT_IDLE_SEC = 5.0
+IDLE_STATE_INTERVAL_SEC = 5.0
+
+SIMPLE_COMMAND_PRESETS: Dict[str, Dict[str, float]] = {
+    "IDLE": {"throttle": 0.0, "steer": 0.0, "brake": 0.4},
+    "UP": {"throttle": 0.9, "steer": 0.0, "brake": 0.0},
+    "DOWN": {"throttle": -0.5, "steer": 0.0, "brake": 0.0},
+    "LEFT": {"throttle": 0.6, "steer": -0.7, "brake": 0.0},
+    "RIGHT": {"throttle": 0.6, "steer": 0.7, "brake": 0.0},
+}
 
 
 def clamp(value: float, low: float, high: float) -> float:
@@ -146,7 +157,7 @@ class VehicleModel:
             "sim": {"dt": self._last_dt},
         }
 
-    @property
+    @property#最後に#ctrlを受け取ってからの経過時間を返す関数
     def ctrl_age(self) -> float:
         return self._last_ctrl_age
 
@@ -207,6 +218,7 @@ class ManagerNode:
         self._ctrl_recv_count = 0
         self._ctrl_drop_count = 0
         self._state_sent_count = 0
+        self._last_idle_state_emit: float = 0.0
 
     # --- connection management ------------------------------------------
     def start(self) -> None:
@@ -227,6 +239,7 @@ class ManagerNode:
         self._connection_alive.clear()
         self._reconnect_event.set()
         self._disconnected_event.set()
+        LOGGER.info("Node stopped 0!!!")
         with self._conn_lock:
             if self._conn is not None:
                 try:
@@ -234,8 +247,10 @@ class ManagerNode:
                 except Exception:  # noqa: BLE001
                     pass
                 self._conn = None
+        LOGGER.info("Node stopped 1!!!")
         for thread in self._threads:
             thread.join(timeout=1.0)
+        LOGGER.info("Node stopped 2!!!")
 
     def _connection_loop(self) -> None:
         while not self._stop_event.is_set():
@@ -253,7 +268,9 @@ class ManagerNode:
                     self._connection_alive.clear()
                     self._disconnected_event.clear()
                 LOGGER.info("connecting to Sora %s", self.signaling_urls)
+                LOGGER.debug("connection loop state: reconnect=%s stop=%s", self._reconnect_event.is_set(), self._stop_event.is_set())#ループの状態を観測
                 LOGGER.info("channel_id %s", self.channel_id)
+                LOGGER.debug("about to call connect() with %s", conn)
                 conn.connect()
                 if not self._connected_event.wait(timeout=10.0):
                     LOGGER.error("Sora connect timeout")
@@ -264,8 +281,12 @@ class ManagerNode:
                 self._connection_alive.set()
                 LOGGER.info("Sora connected: connection_id=%s", self._connection_id)
                 self._disconnected_event.wait()
-            except Exception as exc:  # noqa: BLE001
-                LOGGER.exception("connection loop error: %s", exc)
+            except Exception:  # noqa: BLE001
+                LOGGER.exception(
+                    "connection loop error; signaling_urls=%s metadata=%s",
+                    self.signaling_urls,
+                    self.metadata,
+                )
                 time.sleep(2.0)
             finally:
                 with self._conn_lock:
@@ -281,6 +302,7 @@ class ManagerNode:
                     self._reconnect_event.set()
 
     def _create_connection(self) -> SoraConnection:
+        LOGGER.info("creating Sora connection with urls=%s channel=%s video=%s", self.signaling_urls, self.channel_id, True)#SDKに渡している値を確定させる
         conn = self._sora.create_connection(
             signaling_urls=self.signaling_urls,
             role="sendrecv",
@@ -294,6 +316,7 @@ class ManagerNode:
                 {"label": self.state_label, "direction": "sendonly", "ordered": True},
             ],
         )
+        LOGGER.info("creating Sora connection with urls=%s channel=%s video=%s", self.signaling_urls, self.channel_id, True)#SDKに渡している値を確定させる
 
         def on_set_offer(raw: str, *, ref=conn) -> None:
             self._on_set_offer(ref, raw)
@@ -338,6 +361,7 @@ class ManagerNode:
         ):
             self._connected_event.set()
 
+    # データチャネルを受けるときに呼ばれる
     def _on_data_channel(self, conn: SoraConnection, label: str) -> None:
         with self._conn_lock:
             if conn is not self._conn:
@@ -346,7 +370,9 @@ class ManagerNode:
             self._dc_ready[label] = True
             LOGGER.info("data channel ready: %s", label)
 
+    #soraのデータチャネルから届いた生のメッセージを受け取りJSONに解釈して種類別に振り分ける入り口
     def _on_message(self, conn: SoraConnection, label: str, data: bytes) -> None:
+        LOGGER.info("recv message label=%s payload=%s ", label, data[:128])#ラベル違いやJSONでコード失敗を洗い出す
         with self._conn_lock:
             if conn is not self._conn:
                 return
@@ -355,37 +381,63 @@ class ManagerNode:
         except json.JSONDecodeError:
             LOGGER.warning("drop malformed json on %s", label)
             return
-        msg_type = payload.get("type")
-        if msg_type == "ctrl" and label == self.ctrl_label:
+        msg_type = payload.get("t") or payload.get("type")
+        if isinstance(msg_type, str):
+            msg_type_norm = msg_type.lower()
+        else:
+            msg_type_norm = None
+        LOGGER.info("msg_type=%s label=%s ", msg_type, label)#ラベル違いやJSONでコード失敗を洗い出す
+        if msg_type_norm in {"cmd", "ctrl"} and label == self.ctrl_label:
             self._handle_ctrl(payload)
-        elif msg_type == "hb":
+        elif msg_type_norm == "hb":
             self._handle_heartbeat(payload)
-        elif msg_type == "estop":
+        elif msg_type_norm == "estop":
             self._handle_estop(payload)
         else:
             LOGGER.debug("ignore message type=%s label=%s", msg_type, label)
 
     def _on_disconnect(self, conn: SoraConnection, code: SoraSignalingErrorCode, msg: str) -> None:
+        
         with self._conn_lock:
             if conn is not self._conn:
                 return
-        LOGGER.warning("Sora disconnected: %s %s", code, msg)
+        LOGGER.warning("Sora disconnected: conn=%s code=%s msg=%s url_list=%s", conn, code, msg, self.signaling_urls)#実際に切断された接続がどのURLを保持していたかを記録する
         self._connection_alive.clear()
         self._disconnected_event.set()
 
-    # --- message handlers -------------------------------------------------
+    #振り分けられた操作コマンドを解釈して現在の操作状態に反映する
     def _handle_ctrl(self, msg: Dict[str, object]) -> None:
         seq = msg.get("seq")
+        command = msg.get("command")
+        LOGGER.info("ctrl received seq=%s command=%s cmd=%s", seq, command, msg.get("cmd"))#受信したコマンドをすべて記録する。ここで0件のままなら受信自体ができていない。
         if not isinstance(seq, int):
             LOGGER.warning("ctrl without seq: %s", msg)
             return
-        cmd = msg.get("cmd") or {}
-        throttle = clamp(float(cmd.get("throttle", 0.0)), -1.0, 1.0)
-        steer = clamp(float(cmd.get("steer", 0.0)), -1.0, 1.0)
-        brake = clamp(float(cmd.get("brake", 0.0)), 0.0, 1.0)
-        mode = str(cmd.get("mode", "arcade"))
+        throttle = steer = brake = 0.0
+        mode = "arcade"
+        if isinstance(command, str):
+            preset = SIMPLE_COMMAND_PRESETS.get(command.upper())
+            if not preset:
+                LOGGER.warning("unknown ctrl command=%s payload=%s", command, msg)
+                return
+            throttle = clamp(float(preset.get("throttle", 0.0)), -1.0, 1.0)
+            steer = clamp(float(preset.get("steer", 0.0)), -1.0, 1.0)
+            brake = clamp(float(preset.get("brake", 0.0)), 0.0, 1.0)
+            if "mode" in preset:
+                mode = str(preset["mode"])
+        else:
+            cmd = msg.get("cmd") or {}
+            throttle = clamp(float(cmd.get("throttle", 0.0)), -1.0, 1.0)
+            steer = clamp(float(cmd.get("steer", 0.0)), -1.0, 1.0)
+            brake = clamp(float(cmd.get("brake", 0.0)), 0.0, 1.0)
+            mode = str(cmd.get("mode", mode))
         now_mono = time.perf_counter()
-        client_ts_ms = msg.get("t") if isinstance(msg.get("t"), (int, float)) else None
+        client_ts_ms = None
+        for key in ("ts", "t"):
+            ts_candidate = msg.get(key)
+            if isinstance(ts_candidate, (int, float)):
+                client_ts_ms = ts_candidate
+                break
 
         with self._ctrl_lock:
             if self._last_ctrl and seq <= self._last_ctrl.seq:
@@ -454,7 +506,11 @@ class ManagerNode:
     def _heartbeat_loop(self) -> None:
         while not self._stop_event.is_set():
             now = time.time()
-            if now - self._last_hb_sent >= HEARTBEAT_SEC:
+            with self._vehicle_lock:
+                ctrl_age = self._vehicle.ctrl_age
+            idle = math.isinf(ctrl_age) or ctrl_age > CTRL_HOLD_SEC + CTRL_DAMP_SEC
+            interval = HEARTBEAT_IDLE_SEC if idle else HEARTBEAT_SEC
+            if now - self._last_hb_sent >= interval:
                 self._send_heartbeat()
                 self._last_hb_sent = now
             time.sleep(0.1)
@@ -485,7 +541,15 @@ class ManagerNode:
             data = self._vehicle.snapshot()
             ctrl_age = self._vehicle.ctrl_age
             estop = self._vehicle.estop_active
-        now_ms = int(time.time() * 1000.0)
+            now_wall = time.time()
+            idle = math.isinf(ctrl_age) or ctrl_age > CTRL_HOLD_SEC + CTRL_DAMP_SEC
+            if idle:
+                if now_wall - self._last_idle_state_emit < IDLE_STATE_INTERVAL_SEC:
+                    return None
+                self._last_idle_state_emit = now_wall
+            else:
+                self._last_idle_state_emit = 0.0
+        now_ms = int(now_wall * 1000.0)
         status_ok = not estop
         status_msg = "estop" if estop else ""
         if not estop:
@@ -514,6 +578,18 @@ class ManagerNode:
             "status": {"ok": status_ok, "msg": status_msg},
             "sim": data["sim"],
         }
+        # Legacy fields expected by existing HUD/dev-tools: expose planar pose/vel at top level.
+        pose = data["pose"]
+        vel = data["vel"]
+        payload.update(
+            {
+                "x": pose.get("x"),
+                "y": pose.get("z"),  # legacy clients treat Z as forward axis
+                "theta": pose.get("yaw"),
+                "vx": vel.get("vx"),
+                "wz": vel.get("wz"),
+            }
+        )
         if hb_age is not None:
             payload["status"]["hb_age"] = hb_age
         if self._last_ctrl_latency_ms is not None:
@@ -537,8 +613,9 @@ class ManagerNode:
             with self._stats_lock:
                 self._state_sent_count += 1
         except Exception as exc:  # noqa: BLE001
-            LOGGER.warning("failed to send state: %s", exc)
+            LOGGER.debug("send failed just before disconnect: label=%s err=%s", self.state_label, exc)# 切断直前にエラーが増えていないかを見る
 
+    
     def _send_heartbeat(self) -> None:
         if not self._connection_alive.is_set():
             return
@@ -574,9 +651,13 @@ class ManagerNode:
 
 def load_config(args: argparse.Namespace):
     urls = os.getenv("VITE_SORA_SIGNALING_URLS") or os.getenv("SORA_SIGNALING_URL")
+    LOGGER.debug("env signaling urls raw=%r SORA=%r", os.getenv("VITE_SORA_SIGNALING_URLS"), os.getenv("SORA_SIGNALING_URL"))#どちらの環境変数が実際に使われているかを記録
+    
     if not urls:
         raise ValueError("SORA_SIGNALING_URL or VITE_SORA_SIGNALING_URLS must be set")
     signaling_urls = [u.strip() for u in urls.split(",") if u.strip()]
+    LOGGER.debug("parsed signaling urls=%s", signaling_urls) #リスト化した結果が ws://… か wss://… か確認
+    
     channel_id = args.room or os.getenv("VITE_SORA_CHANNEL_ID") or "sora"
     ctrl_label = os.getenv("VITE_CTRL_LABEL", "#ctrl")
     state_label = os.getenv("SORA_STATE_LABEL", "#state")
@@ -595,7 +676,7 @@ def main() -> None:
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(levelname)s %(name)s: %(message)s")
-    load_dotenv("/Users/tsunogayashouta/aframe-manager-demo/ui/.env")
+    load_dotenv("/Users/tsunogayashouta/aframe-manager-demo2/ui/.env")
     cfg = load_config(args)
     node = ManagerNode(*cfg)
 

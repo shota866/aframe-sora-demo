@@ -25,7 +25,7 @@ function formatLatency(latencyMs) {
 }
 
 export function createSoraClient(options) {
-  console.log("create Sora client")
+  console.log('createSoraClient options', options);
   return new SoraDataChannelClient(options);
 }
 
@@ -454,9 +454,10 @@ class SoraDataChannelClient {
     }
   }
 
+  //#stateデータチャネルの受信入口で、チャネルの準備完了(ready)を検出、マークするための処理
   _handleMessage(event) {
     const { label, data } = event || {};
-    if (label !== this.stateLabel) return;
+    if (label !== this.stateLabel) return;//#state以外は捨てるフィルタ
     if (!this._stateReady) {
       const live = this._stateChannel || this._session?.soraDataChannels?.[this.stateLabel];
       if (live?.readyState === 'open') {
@@ -483,7 +484,10 @@ class SoraDataChannelClient {
       return;
     }
 
-    if (!payload || payload.t !== 'state') return;
+    const isStatePayload =
+      (typeof payload.type === 'string' && payload.type.toLowerCase() === 'state') ||
+      (typeof payload.t === 'string' && payload.t.toLowerCase() === 'state');
+    if (!isStatePayload) return;
     this._recvCount += 1;
     if (this._lastCtrlSendAt != null) {
       this._latencyMs = performance.now() - this._lastCtrlSendAt;
@@ -499,6 +503,7 @@ class SoraDataChannelClient {
   _maybeLogStats() {
     const now = performance.now();
     if (now - this._lastStatsLog < 1000) return;
+    if (!this.debug && this._sendCount === 0 && this._recvCount === 0) return;
     this._lastStatsLog = now;
     const latency = formatLatency(this._latencyMs);
     console.info(`[sora] stats #ctrl:${this._sendCount} #state:${this._recvCount} latency:${latency}`);
