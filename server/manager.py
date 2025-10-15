@@ -26,16 +26,16 @@ from sora_sdk import Sora, SoraConnection, SoraSignalingErrorCode
 
 
 LOGGER = logging.getLogger("manager")
-CTRL_HOLD_SEC = 0.2
-CTRL_DAMP_SEC = 1.0
-STATE_RATE_HZ = 30.0
-PHYSICS_RATE_HZ = 60.0
-HEARTBEAT_SEC = 1.0
-HEARTBEAT_IDLE_SEC = 5.0
-IDLE_STATE_INTERVAL_SEC = 5.0
+CTRL_HOLD_SEC = 0.2#最後に受け取った操作コマンドを保持する時間
+CTRL_DAMP_SEC = 1.0#最後に受け取った操作コマンドを徐々に減衰させる時間
+STATE_RATE_HZ = 30.0#状態更新の送信頻度
+PHYSICS_RATE_HZ = 60.0#車両の物理シミュレーションの更新頻度
+HEARTBEAT_SEC = 1.0#UIからのハートビートを送る頻度
+HEARTBEAT_IDLE_SEC = 5.0#UIからのハートビートを送る頻度（操作コマンドが来ていないとき）
+IDLE_STATE_INTERVAL_SEC = 5.0#操作コマンドが来ていないときに状態更新を送る頻度
 
 SIMPLE_COMMAND_PRESETS: Dict[str, Dict[str, float]] = {
-    "IDLE": {"throttle": 0.0, "steer": 0.0, "brake": 0.4},
+    "IDLE": {"throttle": 0.0, "steer": 0.0, "brake": 0.4},#throttle:前進/後退、steer:左右、brake:ブレーキ
     "UP": {"throttle": 0.9, "steer": 0.0, "brake": 0.0},
     "DOWN": {"throttle": -0.5, "steer": 0.0, "brake": 0.0},
     "LEFT": {"throttle": 0.6, "steer": -0.7, "brake": 0.0},
@@ -43,18 +43,18 @@ SIMPLE_COMMAND_PRESETS: Dict[str, Dict[str, float]] = {
 }
 
 
-def clamp(value: float, low: float, high: float) -> float:
+def clamp(value: float, low: float, high: float) -> float:#値をlowからhighの範囲に収める関数
     return low if value < low else high if value > high else value
 
 
-def wrap_angle(rad: float) -> float:
+def wrap_angle(rad: float) -> float:#角度を-piからpiの範囲に収める関数
     while rad > math.pi:
         rad -= math.tau
     while rad <= -math.pi:
         rad += math.tau
     return rad
 
-
+#受け取った操作コマンドを保存するためのデータクラス
 @dataclass
 class ControlSnapshot:
     seq: int
@@ -69,30 +69,31 @@ class ControlSnapshot:
         return now - self.received_at
 
 
-class VehicleModel:
+class VehicleModel:#車両の状態を管理するクラス
     """Planar vehicle integrator suitable for network replay."""
 
     MAX_SPEED = 20.0  # m/s
     MAX_ACCEL = 9.0   # m/s^2 forward/back
-    BRAKE_DECEL = 14.0
-    COAST_DECEL = 2.0
-    IDLE_DECEL = 1.5
+    BRAKE_DECEL = 14.0#ブレーキの減速
+    COAST_DECEL = 2.0#自然減速
+    IDLE_DECEL = 1.5#アクセルオフ時の減速
     YAW_RATE_MAX = 2.5  # rad/s
     YAW_SLEW = 6.0      # rad/s^2
-    ANGULAR_DAMP = 4.0
+    ANGULAR_DAMP = 4.0#制動時の角速度の減衰
 
     def __init__(self) -> None:
         self.x = 0.0
         self.y = 0.0
         self.z = 0.0
-        self.yaw = 0.0
-        self.vx = 0.0
-        self.wz = 0.0
+        self.yaw = 0.0#車両の向き
+        self.vx = 0.0#前進速度
+        self.wz = 0.0#角速度
         self._last_dt = 1.0 / PHYSICS_RATE_HZ
         self._last_ctrl_age = float("inf")
         self._estop_active = False
 
-    def step(self, ctrl: Optional[ControlSnapshot], dt: float, now: float) -> None:
+    #操作コマンドを受け取って車両の状態をΔt秒分更新する関数
+    def step(self, ctrl: Optional[ControlSnapshot], dt: float, now: float) -> None:#snapshotで現在の状態を辞書化
         self._last_dt = dt
         throttle = steer = brake = 0.0
         age = float("inf")
@@ -103,18 +104,18 @@ class VehicleModel:
                 steer = ctrl.steer
                 brake = ctrl.brake
             else:
-                decay = clamp((age - CTRL_HOLD_SEC) / CTRL_DAMP_SEC, 0.0, 1.0)
-                throttle = ctrl.throttle * (1.0 - decay)
-                steer = ctrl.steer * (1.0 - decay)
-                brake = max(ctrl.brake, decay)
+                decay = clamp((age - CTRL_HOLD_SEC) / CTRL_DAMP_SEC, 0.0, 1.0)#減衰率
+                throttle = ctrl.throttle * (1.0 - decay)#減衰させる
+                steer = ctrl.steer * (1.0 - decay)#減衰させる
+                brake = max(ctrl.brake, decay)#減衰させる
         self._last_ctrl_age = age
 
         if self._estop_active:
             throttle = 0.0
             brake = 1.0
-
-        accel = throttle * self.MAX_ACCEL
-        if math.isclose(throttle, 0.0, abs_tol=1e-3):
+#車両の前進速度を更新する
+        accel = throttle * self.MAX_ACCEL#アクセルによる加速度
+        if math.isclose(throttle, 0.0, abs_tol=1e-3):#アクセルオフ時の自然減速
             if abs(self.vx) > 1e-3:
                 accel -= math.copysign(self.COAST_DECEL, self.vx)
             else:
@@ -131,7 +132,7 @@ class VehicleModel:
         if abs(self.vx) < 1e-3:
             self.vx = 0.0
         self.vx = clamp(self.vx, -self.MAX_SPEED, self.MAX_SPEED)
-
+#車両の向きを更新する
         target_wz = steer * self.YAW_RATE_MAX
         slew = self.YAW_SLEW * dt
         if ctrl:
@@ -149,7 +150,7 @@ class VehicleModel:
         self.x += self.vx * heading_x * dt
         self.z += self.vx * heading_z * dt
         self.yaw = yaw_now
-
+#車両の現在の状態を辞書化して返す関数
     def snapshot(self) -> Dict[str, Dict[str, float]]:
         return {
             "pose": {"x": self.x, "y": self.y, "z": self.z, "yaw": self.yaw},
@@ -174,7 +175,7 @@ class VehicleModel:
         return self._estop_active
 
 
-class ManagerNode:
+class ManagerNode:#Soraとの接続を管理し、車両の状態を更新・送信するクラス
     def __init__(
         self,
         signaling_urls,
@@ -183,7 +184,7 @@ class ManagerNode:
         state_label,
         metadata=None,
     ) -> None:
-        self._sora = Sora()
+        self._sora = Sora()#Sora SDKのインスタンスを作成
         self.signaling_urls = signaling_urls
         self.channel_id = channel_id
         self.ctrl_label = ctrl_label
@@ -195,12 +196,12 @@ class ManagerNode:
         self._disconnected_event = threading.Event()
         self._connected_event = threading.Event()
         self._connection_alive = threading.Event()
-        self._conn_lock = threading.Lock()
-        self._conn: Optional[SoraConnection] = None
+        self._conn_lock = threading.Lock()#SoraConnectionインスタンスへのアクセスを保護するためのロック
+        self._conn: Optional[SoraConnection] = None#SoraConnectionインスタンス
         self._connection_id: Optional[str] = None
-        self._dc_ready: Dict[str, bool] = {self.ctrl_label: False, self.state_label: False}
+        self._dc_ready: Dict[str, bool] = {self.ctrl_label: False, self.state_label: False}#データチャネルの準備状態を管理する辞書
 
-        self._vehicle = VehicleModel()
+        self._vehicle = VehicleModel()#車両の状態を管理するVehicleModelインスタンス
         self._vehicle_lock = threading.Lock()
         self._state_seq = 0
 
@@ -221,15 +222,15 @@ class ManagerNode:
         self._last_idle_state_emit: float = 0.0
 
     # --- connection management ------------------------------------------
-    def start(self) -> None:
+    def start(self) -> None:#managerノードを開始する関数
         self._stop_event.clear()
         self._reconnect_event.set()
         self._threads = [
-            threading.Thread(target=self._connection_loop, name="sora-conn", daemon=True),
-            threading.Thread(target=self._physics_loop, name="physics", daemon=True),
-            threading.Thread(target=self._state_loop, name="state", daemon=True),
-            threading.Thread(target=self._heartbeat_loop, name="heartbeat", daemon=True),
-            threading.Thread(target=self._stat_loop, name="stats", daemon=True),
+            threading.Thread(target=self._connection_loop, name="sora-conn", daemon=True),#Soraとの接続を管理するスレッド（作業）
+            threading.Thread(target=self._physics_loop, name="physics", daemon=True),#車両の物理シミュレーションを管理するスレッド（作業）
+            threading.Thread(target=self._state_loop, name="state", daemon=True),#車両の状態更新を管理するスレッド（作業）
+            threading.Thread(target=self._heartbeat_loop, name="heartbeat", daemon=True),#UIとのハートビートを管理するスレッド（作業）
+            threading.Thread(target=self._stat_loop, name="stats", daemon=True),#統計情報を管理するスレッド（作業）
         ]
         for thread in self._threads:
             thread.start()
@@ -239,8 +240,8 @@ class ManagerNode:
         self._connection_alive.clear()
         self._reconnect_event.set()
         self._disconnected_event.set()
-        LOGGER.info("Node stopped 0!!!")
-        with self._conn_lock:
+        LOGGER.info("Node stopped 0!!!")#停止処理の開始を記録
+        with self._conn_lock:#SoraConnectionインスタンスを切断する
             if self._conn is not None:
                 try:
                     self._conn.disconnect()
@@ -409,7 +410,7 @@ class ManagerNode:
     def _handle_ctrl(self, msg: Dict[str, object]) -> None:
         seq = msg.get("seq")
         command = msg.get("command")
-        LOGGER.info("ctrl received seq=%s command=%s cmd=%s", seq, command, msg.get("cmd"))#受信したコマンドをすべて記録する。ここで0件のままなら受信自体ができていない。
+        
         if not isinstance(seq, int):
             LOGGER.warning("ctrl without seq: %s", msg)
             return

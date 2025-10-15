@@ -346,14 +346,15 @@ document.addEventListener('DOMContentLoaded', () => {
     onInputChange: (event) => controlLog.input(event),
     onDirection: (direction) => {
       const ready = client.isCtrlReady();
-      const ok = client.sendCtrl({ t: 'cmd', v: direction });
+      const command = direction ?? 'IDLE';
+      const ok = client.sendCtrl({ command });
       if (ok) {
         metrics.ctrlCount += 1;
         metrics.lastCtrlAt = performance.now();
         hud.setMetrics(metrics);
       }
       controlLog.commandSend({
-        command: direction,
+        command,
         ok,
         ready,
         count: metrics.ctrlCount,
@@ -412,14 +413,14 @@ document.addEventListener('DOMContentLoaded', () => {
   window.addEventListener('app:estop', () => {
     controlLog.estop('button');
     const ready = client.isCtrlReady();
-    const ok = client.sendCtrl({ t: 'cmd', v: 'STOP' });
+    const ok = client.sendCtrl({ type: 'estop', source: 'ui' });
     if (ok) {
       metrics.ctrlCount += 1;
       metrics.lastCtrlAt = performance.now();
       hud.setMetrics(metrics);
     }
     controlLog.commandSend({
-      command: 'STOP',
+      command: 'ESTOP',
       ok,
       ready,
       count: metrics.ctrlCount,

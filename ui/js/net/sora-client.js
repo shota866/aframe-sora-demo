@@ -84,6 +84,7 @@ class SoraDataChannelClient {
     this._lastCtrlSendAt = null;
     this._latencyMs = null;
     this._dummyStreamInfo = null;
+    this._ctrlSeq = 0;
 
     this._listeners = {
       open: new Set(),
@@ -144,7 +145,7 @@ class SoraDataChannelClient {
 
   sendCtrl(message) {
     if (!message || typeof message !== 'object') {
-      throw new Error('sendCtrl expects a JSON-serialisable object');
+      message = { command: message ?? null };
     }
     const ready = this.isCtrlReady();
     if (!this._session || !ready) {
@@ -152,7 +153,7 @@ class SoraDataChannelClient {
       return false;
     }
     try {
-      const payload = encoder.encode(JSON.stringify(message));
+      const payload = this._encodeCtrlPayload(message);
       this._session.sendMessage(this.ctrlLabel, payload);
       this._sendCount += 1;
       this._lastCtrlSendAt = performance.now();
@@ -228,6 +229,7 @@ class SoraDataChannelClient {
     this._recvCount = 0;
     this._latencyMs = null;
     this._lastCtrlSendAt = null;
+    this._ctrlSeq = 0;
 
     const connection = this.sdk.connection(this.signalingUrls, this.debug);
     this._connection = connection;
@@ -522,5 +524,38 @@ class SoraDataChannelClient {
       clearInterval(this._statsTimer);
       this._statsTimer = null;
     }
+  }
+
+  _nextCtrlSeq() {
+    this._ctrlSeq = (this._ctrlSeq + 1) % 0x80000000;
+    return this._ctrlSeq;
+  }
+
+  _encodeCtrlPayload(rawMessage) {
+    let payload;
+    if (typeof rawMessage === 'string') {
+      payload = { command: rawMessage };
+    } else if (rawMessage && typeof rawMessage === 'object') {
+      payload = { ...rawMessage };
+    } else {
+      payload = { command: rawMessage ?? null };
+    }
+
+    if (payload.command === undefined && payload.v !== undefined) {
+      payload.command = payload.v;
+    }
+
+    const seq = this._nextCtrlSeq();
+    const ts = Date.now();
+    if (!payload.type && typeof payload.t === 'string') {
+      payload.type = payload.t;
+    }
+    payload.type = typeof payload.type === 'string' ? payload.type : 'cmd';
+    payload.seq = seq;
+    payload.ts = ts;
+    delete payload.v;
+    delete payload.t;
+
+    return encoder.encode(JSON.stringify(payload));
   }
 }
