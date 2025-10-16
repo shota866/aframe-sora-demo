@@ -1,0 +1,125 @@
+import { CTRL_SEND_HZ } from './constants.js';
+import { KeyboardCtrlRepeater } from './input/keyboard-repeater.js';
+import { applyServerState } from '../scene/car-state.js';
+import { configureCarForNet } from '../scene/car-setup.js';
+import { createSoraClient } from '../net/sora-client.js';
+
+export function createNetBridge({ config, hud, controlLog, carEl }) {
+  if (!hud) throw new Error('HUD instance required');
+  if (!controlLog) throw new Error('Control logger required');
+  if (!carEl) throw new Error('Car element (#car) not found');
+
+  const metrics = {
+    ctrlCount: 0,
+    stateCount: 0,
+    latencyMs: null,
+    lastCtrlAt: null,
+  };
+
+  const client = createSoraClient({
+    signalingUrls: config.signalingUrls,
+    channelId: config.channelId,
+    ctrlLabel: config.ctrlLabel,
+    stateLabel: config.stateLabel,
+    metadata: config.metadata,
+    debug: config.debug,
+  });
+
+  const keyRepeater = new KeyboardCtrlRepeater({
+    hz: CTRL_SEND_HZ,
+    onInputChange: (event) => controlLog.input(event),
+    onDirection: (direction) => handleDirection(direction),
+  });
+
+  configureCarForNet(carEl);
+
+  client.onOpen(() => {
+    metrics.ctrlCount = 0;
+    metrics.stateCount = 0;
+    metrics.latencyMs = null;
+    metrics.lastCtrlAt = null;
+    hud.setConnection('connected', [
+      `channel: ${config.channelId}`,
+      `ctrl: ${config.ctrlLabel}`,
+      `state: ${config.stateLabel}`,
+    ]);
+    hud.setMetrics(metrics);
+  });
+
+  client.onClose(() => {
+    hud.setConnection('disconnected', ['connection closed']);
+  });
+
+  client.onError((err) => {
+    const message = err?.message || String(err);
+    hud.setConnection('degraded', [`error: ${message}`]);
+  });
+
+  client.onState((state) => {
+    metrics.stateCount += 1;
+    if (metrics.lastCtrlAt != null) {
+      metrics.latencyMs = performance.now() - metrics.lastCtrlAt;
+    }
+    hud.setMetrics(metrics);
+    hud.setPose(state);
+    applyServerState(carEl, state);
+    controlLog.state({ metrics, state });
+  });
+
+  function handleDirection(direction) {
+    const ready = client.isCtrlReady();
+    const command = direction ?? 'IDLE';
+    const ok = client.sendCtrl({ command });
+    if (ok) {
+      metrics.ctrlCount += 1;
+      metrics.lastCtrlAt = performance.now();
+      hud.setMetrics(metrics);
+    }
+    controlLog.commandSend({
+      command,
+      ok,
+      ready,
+      count: metrics.ctrlCount,
+      reason: ready ? (ok ? null : 'sendCtrl returned false') : 'data channel not ready',
+    });
+  }
+
+  function sendEstop() {
+    controlLog.estop('button');
+    const ready = client.isCtrlReady();
+    const ok = client.sendCtrl({ type: 'estop', source: 'ui' });
+    if (ok) {
+      metrics.ctrlCount += 1;
+      metrics.lastCtrlAt = performance.now();
+      hud.setMetrics(metrics);
+    }
+    controlLog.commandSend({
+      command: 'ESTOP',
+      ok,
+      ready,
+      count: metrics.ctrlCount,
+      reason: ready
+        ? ok
+          ? 'emergency stop request'
+          : 'sendCtrl returned false'
+        : 'data channel not ready',
+    });
+  }
+
+  return {
+    start() {
+      hud.setConnection('degraded', ['connecting']);
+      keyRepeater.start();
+      client.connect();
+    },
+    stop() {
+      keyRepeater.stop();
+      return client.disconnect();
+    },
+    handleDirection,
+    sendEstop,
+    metrics,
+    client,
+  };
+}
+
