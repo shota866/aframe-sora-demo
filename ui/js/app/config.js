@@ -1,8 +1,8 @@
 const DEFAULT_CONFIG = {
   signalingUrls: ['wss://sora2.uclab.jp/signaling'],
   channelId: 'aframe-demo',
-  ctrlLabel: '#ctrl',
-  stateLabel: '#state',
+  ctrlLabel: 'ctrl',
+  stateLabel: 'state',
   metadata: null,
   debug: false,
   mode: 'net',
@@ -32,6 +32,12 @@ function parseMaybeJson(value) {
   }
 }
 
+function ensureLabel(value, fallback) {
+  const label = (value || '').trim();
+  if (!label) return fallback;
+  return label.startsWith('#') ? label : `#${label}`;
+}
+
 export function resolveConfig() {
   const envConfig = DEFAULT_CONFIG;
   const globalConfig = typeof window !== 'undefined' ? window.NET_CONFIG || {} : {};
@@ -51,8 +57,9 @@ export function resolveConfig() {
   merged.channelId = merged.channelId || merged.room || merged.channel;
   merged.metadata = parseMaybeJson(merged.metadata);
   merged.localMode = String(merged.mode || '').toLowerCase() === 'local';
+  merged.ctrlLabel = ensureLabel(merged.ctrlLabel, '#ctrl');
+  merged.stateLabel = ensureLabel(merged.stateLabel, '#state');
   return merged;
 }
 
 export { DEFAULT_CONFIG, META_ENV };
-
