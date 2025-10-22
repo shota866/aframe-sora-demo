@@ -28,8 +28,8 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   config.channelId = config.channelId || 'sora';
-  config.ctrlLabel = config.ctrlLabel || '#ctrl';
-  config.stateLabel = config.stateLabel || '#state';
+  config.ctrlLabel = config.ctrlLabel || 'ctrl';
+  config.stateLabel = config.stateLabel || 'state';
 
   const bridge = createNetBridge({ config, hud, controlLog, carEl });
   hud.setMetrics(bridge.metrics);

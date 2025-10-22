@@ -149,7 +149,7 @@ export class DataChannelManager {
     this.statsTimer = setInterval(() => {
       const latency = formatLatency(this.latencyMs);
       console.info(
-        `[sora] stats #ctrl:${this.sendCount} #state:${this.recvCount} latency:${latency}`,
+        `[sora] stats ctrl:${this.sendCount} state:${this.recvCount} latency:${latency}`,
       );
     }, 5000);
   }
@@ -168,7 +168,7 @@ export class DataChannelManager {
     this.lastStatsLog = now;
     const latency = formatLatency(this.latencyMs);
     console.info(
-      `[sora] stats #ctrl:${this.sendCount} #state:${this.recvCount} latency:${latency}`,
+      `[sora] stats ctrl:${this.sendCount} state:${this.recvCount} latency:${latency}`,
     );
   }
 

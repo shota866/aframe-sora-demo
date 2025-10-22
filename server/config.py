@@ -25,20 +25,27 @@ def _normalise_urls(raw: Sequence[str] | str | None) -> List[str]:
     return [value.strip() for value in candidates if value and value.strip()]
 
 
+def _normalise_label(value: str | None, fallback: str) -> str:
+    label = (value or "").strip()
+    if not label:
+        return fallback
+    return label if label.startswith("#") else f"#{label}"
+
+
 def load_settings(
     args: object,
     env: MutableMapping[str, str] | Mapping[str, str] | None = None,
 ) -> ServerConfig:
     """Resolve configuration from CLI args and environment variables."""
     env = dict(env or os.environ)
-    urls = env.get("VITE_SORA_SIGNALING_URLS") or env.get("SORA_SIGNALING_URL")
+    urls = env.get("VITE_SORA_SIGNALING_URLS")
     signaling_urls = _normalise_urls(urls)
     if not signaling_urls:
-        raise ValueError("SORA_SIGNALING_URL or VITE_SORA_SIGNALING_URLS must be set")
+        raise ValueError("VITE_SORA_SIGNALING_URLS must be set")
 
     channel_id = getattr(args, "room", None) or env.get("VITE_SORA_CHANNEL_ID") or "sora"
-    ctrl_label = env.get("VITE_CTRL_LABEL", "#ctrl")
-    state_label = env.get("SORA_STATE_LABEL", "#state")
+    ctrl_label = _normalise_label(env.get("VITE_CTRL_LABEL"), "#ctrl")
+    state_label = _normalise_label(env.get("VITE_STATE_LABEL"), "#state")
 
     metadata_raw = env.get("SORA_METADATA")
     metadata: Optional[Mapping[str, object]]
@@ -59,4 +66,3 @@ def load_settings(
         state_label=state_label,
         metadata=metadata or None,
     )
-

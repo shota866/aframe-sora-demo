@@ -1,3 +1,4 @@
+#soraという外部サービスへの橋渡しを行うためのアダプタ
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -5,7 +6,7 @@ from typing import Callable, Mapping, Optional
 
 from sora_sdk import Sora, SoraConnection, SoraSignalingErrorCode
 
-
+#SDKの定義
 @dataclass(frozen=True)
 class SoraConnectionConfig:
     signaling_urls: list[str]
@@ -14,7 +15,7 @@ class SoraConnectionConfig:
     state_label: str
     metadata: Optional[Mapping[str, object]]
 
-
+#イベントハンドラの定義
 @dataclass(frozen=True)
 class SoraEventHandlers:
     on_set_offer: Callable[[SoraConnection, str], None]
@@ -23,7 +24,7 @@ class SoraEventHandlers:
     on_message: Callable[[SoraConnection, str, bytes], None]
     on_disconnect: Callable[[SoraConnection, SoraSignalingErrorCode, str], None]
 
-
+#接続生成ラッパー
 def create_connection(
     sora: Sora,
     config: SoraConnectionConfig,
@@ -43,7 +44,7 @@ def create_connection(
             {"label": config.state_label, "direction": "sendonly", "ordered": True},
         ],
     )
-
+#イベントハンドラ定義
     def _wrap_set_offer(raw: str, *, ref=conn) -> None:
         handlers.on_set_offer(ref, raw)
 
