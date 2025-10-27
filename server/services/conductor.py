@@ -133,12 +133,28 @@ class Conductor:
             self.stop()
 
     # ------------------------------------------------------------------ helpers
+    def _log_state_send(self, payload: str, size: int) -> None:
+        if LOGGER.isEnabledFor(logging.DEBUG):
+            LOGGER.debug(
+                "sending state label=%s size=%d payload=%s",
+                self.config.state_label,
+                size,
+                payload,
+            )
+
     def _send_state(self, obj: Dict[str, object]) -> None:
         if not obj:
             return
-        data = json.dumps(obj, separators=(",", ":")).encode("utf-8")
+        payload_json = json.dumps(obj, separators=(",", ":"))
+        preview = payload_json
+        if len(preview) > 512:
+            preview = f"{preview[:512]}...(truncated)"
+        self._log_state_send(preview, len(payload_json))
+        data = payload_json.encode("utf-8")
         if self._connection_manager.send_data(self.config.state_label, data):
             self._stats_tracker.inc_state_sent()
+        else:
+            LOGGER.debug("state send failed label=%s", self.config.state_label)
 
     def _send_heartbeat(self) -> None:
         if not self._connection_manager.connection_alive.is_set():

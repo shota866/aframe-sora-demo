@@ -30,6 +30,7 @@ class ControlState:
             self._last_ctrl_recv_wall = recv_wall
             return True
 
+    # 最新のコマンド情報を取得するメソッド
     def get_last_ctrl(self) -> Optional[ControlSnapshot]:
         with self._lock:
             return self._last_ctrl

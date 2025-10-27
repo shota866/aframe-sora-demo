@@ -43,6 +43,15 @@ class RaspberryPiStatePublisher(Conductor):
     def state_rate_hz(self) -> float:
         return self._state_rate_hz
 
+    def _log_state_send(self, payload: str, size: int) -> None:  # type: ignore[override]
+        if LOGGER.isEnabledFor(logging.INFO):
+            LOGGER.info(
+                "forwarding state label=%s size=%d payload=%s",
+                self.config.state_label,
+                size,
+                payload,
+            )
+
     def start(self) -> None:  # type: ignore[override]
         self._stop_event.clear()
         self._reconnect_event.set()
@@ -171,6 +180,9 @@ class RaspberryPiStatePublisher(Conductor):
         vel = payload.get("vel")
         if isinstance(pose, Mapping):
             payload["x"] = _as_float(pose.get("x"), payload.get("x", 0.0))
+            # NOTE: For legacy 2D clients, map the 3D 'z' coordinate (depth) to the 2D 'y' coordinate.
+            # The 'pose' object uses a 3D coordinate system (X-Z plane for ground),
+            # while the top-level keys provide a flattened 2D view (X-Y plane).
             payload["y"] = _as_float(pose.get("z"), payload.get("y", 0.0))
             payload["theta"] = _as_float(pose.get("yaw"), payload.get("theta", 0.0))
         if isinstance(vel, Mapping):

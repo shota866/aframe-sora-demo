@@ -30,6 +30,7 @@ class VehicleModel:
         self._last_ctrl_age = float("inf")
         self._estop_active = False
 
+    #コマンド情報から車両の状態を計算して更新するメソッド
     def step(self, ctrl: Optional[ControlSnapshot], dt: float, now: float) -> None:
         self._last_dt = dt
         throttle = steer = brake = 0.0
@@ -51,7 +52,7 @@ class VehicleModel:
             throttle = 0.0
             brake = 1.0
 
-        accel = throttle * self.MAX_ACCEL
+        accel = throttle * self.MAX_ACCEL#前進/後退の加速度を計算
         if math.isclose(throttle, 0.0, abs_tol=1e-3):
             if abs(self.vx) > 1e-3:
                 accel -= math.copysign(self.COAST_DECEL, self.vx)
@@ -72,11 +73,11 @@ class VehicleModel:
 
         target_wz = steer * self.YAW_RATE_MAX
         slew = self.YAW_SLEW * dt
-        if ctrl:
+        if ctrl:#操舵入力がある場合、目標角速度に向けて角速度を変化させる
             delta = clamp(target_wz - self.wz, -slew, slew)
             self.wz += delta
-        else:
-            damping = clamp(self.ANGULAR_DAMP * dt, 0.0, 1.0)
+        else:#3操舵入力がない場合、角速度を減衰させる
+            damping = clamp(self.ANGULAR_DAMP * dt, 0.0, 1.0)  
             self.wz *= 1.0 - damping
         if abs(self.wz) < 1e-3:
             self.wz = 0.0

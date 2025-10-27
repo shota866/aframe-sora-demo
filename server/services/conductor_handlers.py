@@ -60,6 +60,7 @@ class DataChannelMessageHandler:
             self._handle_estop(payload)
         else:
             LOGGER.debug("ignore message type=%s label=%s", msg_type, label)
+            
     # コントロールメッセージを処理するメソッド
     def _handle_ctrl(self, msg: Dict[str, object]) -> None:
         seq = msg.get("seq")
@@ -71,7 +72,7 @@ class DataChannelMessageHandler:
         throttle = steer = brake = 0.0
         mode = "arcade"
         if isinstance(command, str):
-            preset = SIMPLE_COMMAND_PRESETS.get(command.upper())
+            preset = SIMPLE_COMMAND_PRESETS.get(command.upper())#受け取った操作コマンドをSIMPLE_COMMAND_PRESETSに照らして、throttle（前進）,steer（操舵）,brakeの値に変換する
             if not preset:
                 LOGGER.warning("unknown ctrl command=%s payload=%s", command, msg)
                 return
@@ -100,6 +101,7 @@ class DataChannelMessageHandler:
         if client_ts_ms is not None:
             latency_ms = now_wall * 1000.0 - client_ts_ms
 
+        #コマンド情報をControlSnapshotに保存
         snapshot = ControlSnapshot(
             seq=seq,
             throttle=throttle,

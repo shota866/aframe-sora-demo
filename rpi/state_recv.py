@@ -59,7 +59,7 @@ def _load_env(explicit: Optional[str] = None) -> Optional[Path]:
     load_dotenv()
     return None
 
-
+#状態を受信するためのクラス
 class StateReceiver:
     """Simple #state data-channel receiver using the Sora Python SDK."""
 
@@ -91,6 +91,7 @@ class StateReceiver:
         self._state_ready = threading.Event()
         self._lock = threading.Lock()
 
+    # Soraに接続して状態受信を開始するメソッド
     def connect(self) -> None:
         if not self.signaling_urls:
             raise ValueError("signaling_urls must not be empty")

@@ -22,7 +22,7 @@ from .state_payload import StatePayloadBuilder
 LOGGER = logging.getLogger("manager")
 
 
-class PhysicsLoop:
+class PhysicsLoop:#
     """Advance the vehicle model at the physics simulation rate."""
 
     def __init__(
@@ -47,9 +47,9 @@ class PhysicsLoop:
             if dt <= 0.0:
                 dt = self._target_dt
             last = now
-            ctrl = self._control_state.get_last_ctrl()
+            ctrl = self._control_state.get_last_ctrl()#最新のコマンド情報を取得
             with self._vehicle_lock:
-                self._vehicle.step(ctrl, dt, now)
+                self._vehicle.step(ctrl, dt, now)#車両の状態を更新
             elapsed = time.perf_counter() - now
             sleep_for = self._target_dt - elapsed
             if sleep_for > 0:
