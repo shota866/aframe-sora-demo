@@ -26,19 +26,19 @@ def _format_number(value: object, digits: int = 3) -> str:
 
 def _format_state(payload: dict) -> str:
     pose = payload.get("pose") or {}
-    vel = payload.get("vel") or {}
+    velocity = payload.get("velocity") or {}
     status = payload.get("status") or {}
 
-    timestamp = payload.get("t")
+    timestamp = payload.get("sent_at_ms")
     if isinstance(timestamp, (int, float)):
         ts_text = time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(timestamp / 1000.0))
     else:
         ts_text = "n/a"
 
     seq = payload.get("seq", "?")
-    hb_age = status.get("hb_age")
-    if isinstance(hb_age, (int, float)):
-        hb_text = f"{hb_age:.1f}s"
+    hb_age_ms = status.get("hb_age_ms")
+    if isinstance(hb_age_ms, (int, float)):
+        hb_text = f"{hb_age_ms/1000.0:.1f}s"
     else:
         hb_text = status.get("hbAgeMs", "n/a")
 
@@ -55,10 +55,10 @@ def _format_state(payload: dict) -> str:
     return (
         f"[{ts_text}] seq={seq} "
         f"x={_format_number(pose.get('x'))} "
-        f"z={_format_number(pose.get('z'))} "
-        f"yaw={_format_number(pose.get('yaw'))} "
-        f"vx={_format_number(vel.get('vx'))} "
-        f"wz={_format_number(vel.get('wz'))} "
+        f"y={_format_number(pose.get('y'))} "
+        f"heading={_format_number(pose.get('heading'))} "
+        f"linear={_format_number(velocity.get('linear'))} "
+        f"angular={_format_number(velocity.get('angular'))} "
         f"status={'ok' if ok else 'warn'}({status_msg}) "
         f"hb_age={hb_text} latency={latency_text}{estop}"
     )

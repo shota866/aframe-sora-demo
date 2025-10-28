@@ -45,11 +45,6 @@ class StatePayloadBuilder:
 
         now_ms = int(time.time() * 1000.0)
         now_wall = time.time()
-        status_ok = True
-        status_msg = "ok"
-        if hb_age is not None and hb_age > HEARTBEAT_IDLE_SEC:
-            status_ok = False
-            status_msg = f"hb age {hb_age:.1f}s"
         if ctrl_age > IDLE_STATE_INTERVAL_SEC:
             if now_wall - self._last_idle_state_emit < IDLE_STATE_INTERVAL_SEC:
                 return {}
@@ -57,39 +52,53 @@ class StatePayloadBuilder:
         else:
             self._last_idle_state_emit = now_wall
 
-        if estop_active:
+        pose_world = data["pose"]
+        vel_world = data["vel"]
+        planar_pose = {
+            "x": pose_world.get("x"),
+            "y": pose_world.get("z"),
+            "heading": pose_world.get("yaw"),
+        }
+        planar_velocity = {
+            "linear": vel_world.get("vx"),
+            "angular": vel_world.get("wz"),
+        }
+
+        status_msg = "ok"
+        status_ok = True
+        status_payload: Dict[str, object] = {"ok": status_ok, "msg": status_msg}
+
+        if hb_age is not None:
+            status_payload["hb_age_ms"] = hb_age * 1000.0
+            if hb_age > HEARTBEAT_IDLE_SEC:
+                status_ok = False
+                status_msg = f"hb age {hb_age:.1f}s"
+
+        ctrl_latency_ms = self._control_state.get_last_latency_ms()
+        if ctrl_latency_ms is not None:
+            status_payload["ctrl_latency_ms"] = ctrl_latency_ms
+
+        if estop_active or self._estop_state.is_triggered():
             status_ok = False
             status_msg = "estop"
+            status_payload["estop"] = True
+
+        status_payload["ok"] = status_ok
+        status_payload["msg"] = status_msg
 
         payload: Dict[str, object] = {
             "type": "state",
             "seq": self._next_state_seq(),
-            "t": now_ms,
-            "pose": data["pose"],
-            "vel": data["vel"],
-            "status": {"ok": status_ok, "msg": status_msg},
-            "sim": data["sim"],
+            "sent_at_ms": now_ms,
+            "pose": planar_pose,
+            "velocity": planar_velocity,
+            "status": status_payload,
+            "step": {"dt_sec": data["sim"].get("dt")},
         }
 
-        pose = data["pose"]
-        vel = data["vel"]
-        payload.update(
-            {
-                "x": pose.get("x"),
-                "y": pose.get("z"),
-                "theta": pose.get("yaw"),
-                "vx": vel.get("vx"),
-                "wz": vel.get("wz"),
-            }
-        )
-
-        if hb_age is not None:
-            payload["status"]["hb_age"] = hb_age
-        ctrl_latency_ms = self._control_state.get_last_latency_ms()
-        if ctrl_latency_ms is not None:
-            payload["status"]["ctrl_latency_ms"] = ctrl_latency_ms
-        if self._estop_state.is_triggered():
-            payload["status"]["estop"] = True
+        last_ctrl_payload = self._build_last_ctrl_payload()
+        if last_ctrl_payload:
+            payload["last_ctrl"] = last_ctrl_payload
 
         return payload
     
@@ -102,3 +111,31 @@ class StatePayloadBuilder:
         if last is None:
             return None
         return time.time() - last
+
+    def _build_last_ctrl_payload(self) -> Optional[Dict[str, object]]:
+        snapshot = self._control_state.get_last_ctrl()
+        if snapshot is None:
+            return None
+
+        payload: Dict[str, object] = {
+            "seq": snapshot.seq,
+            "mode": snapshot.mode,
+            "command": {
+                "throttle": snapshot.throttle,
+                "steer": snapshot.steer,
+                "brake": snapshot.brake,
+            },
+        }
+
+        if snapshot.client_timestamp_ms is not None:
+            payload["sent_at_ms"] = int(snapshot.client_timestamp_ms)
+
+        recv_wall = self._control_state.get_last_recv_wall()
+        if recv_wall is not None:
+            payload["manager_recv_at_ms"] = int(recv_wall * 1000.0)
+
+        latency_ms = self._control_state.get_last_latency_ms()
+        if latency_ms is not None:
+            payload["latency_ms"] = latency_ms
+
+        return payload

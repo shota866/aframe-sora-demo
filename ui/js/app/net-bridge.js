@@ -28,7 +28,7 @@ export function createNetBridge({ config, hud, controlLog, carEl }) {
   const keyRepeater = new KeyboardCtrlRepeater({
     hz: CTRL_SEND_HZ,
     onInputChange: (event) => controlLog.input(event),
-    onDirection: (direction) => handleDirection(direction),
+    onDirection: (directions) => handleDirection(directions),
   });
 
   configureCarForNet(carEl);
@@ -66,22 +66,25 @@ export function createNetBridge({ config, hud, controlLog, carEl }) {
     controlLog.state({ metrics, state });
   });
 
-  function handleDirection(direction) {
+  function handleDirection(directions) {
     const ready = client.isCtrlReady();
-    const command = direction ?? 'IDLE';
-    const ok = client.sendCtrl({ command });
-    if (ok) {
-      metrics.ctrlCount += 1;
-      metrics.lastCtrlAt = performance.now();
-      hud.setMetrics(metrics);
+    const cmds = Array.isArray(directions) ? directions : directions ? [directions] : [];
+    const commands = cmds.length ? cmds : ['IDLE'];
+    for (const command of commands) {
+      const ok = client.sendCtrl({ command });
+      if (ok) {
+        metrics.ctrlCount += 1;
+        metrics.lastCtrlAt = performance.now();
+        hud.setMetrics(metrics);
+      }
+      controlLog.commandSend({
+        command,
+        ok,
+        ready,
+        count: metrics.ctrlCount,
+        reason: ready ? (ok ? null : 'sendCtrl returned false') : 'data channel not ready',
+      });
     }
-    controlLog.commandSend({
-      command,
-      ok,
-      ready,
-      count: metrics.ctrlCount,
-      reason: ready ? (ok ? null : 'sendCtrl returned false') : 'data channel not ready',
-    });
   }
 
   function sendEstop() {
@@ -122,4 +125,3 @@ export function createNetBridge({ config, hud, controlLog, carEl }) {
     client,
   };
 }
-

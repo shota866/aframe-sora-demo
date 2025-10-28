@@ -6,9 +6,12 @@ export class KeyboardCtrlRepeater {
     this.onDirection = options.onDirection;
     this.onInputChange = typeof options.onInputChange === 'function' ? options.onInputChange : null;
     this.intervalMs = Math.max(10, Math.round(1000 / this.hz));
+    this.repeatMs = Math.max(10, Number(options.repeatMs) || 120);
     this.keys = new Set();
     this.timer = null;
-    this._lastDirection = null;
+    this._lastDirection = [];
+    this._lastSendDirection = [];
+    this._lastSendAt = 0;
     this._handleKeyDown = this._handleKeyDown.bind(this);
     this._handleKeyUp = this._handleKeyUp.bind(this);
   }
@@ -25,7 +28,9 @@ export class KeyboardCtrlRepeater {
       window.clearInterval(this.timer);
       this.timer = null;
     }
-    this._lastDirection = null;
+    this._lastDirection = [];
+    this._lastSendDirection = [];
+    this._lastSendAt = 0;
     window.removeEventListener('keydown', this._handleKeyDown);
     window.removeEventListener('keyup', this._handleKeyUp);
   }
@@ -43,26 +48,48 @@ export class KeyboardCtrlRepeater {
 
   _tick() {
     const direction = this._currentDirection();
-    if (direction !== this._lastDirection) {
+    const now =
+      typeof performance !== 'undefined' && typeof performance.now === 'function'
+        ? performance.now()
+        : Date.now();
+    const directionChanged = !directionsEqual(direction, this._lastDirection);
+    if (directionChanged) {
       this._lastDirection = direction;
-      this._notifyInput(direction ? 'direction' : 'idle', null, direction);
+      this._notifyInput(direction.length ? 'direction' : 'idle', null, direction);
       if (typeof this.onDirection === 'function') {
         this.onDirection(direction);
+        this._lastSendDirection = direction;
+        this._lastSendAt = now;
       }
+      if (direction.length === 0) {
+        this._lastSendDirection = [];
+      }
+    } else if (
+      direction.length &&
+      typeof this.onDirection === 'function' &&
+      (!directionsEqual(direction, this._lastSendDirection) || now - this._lastSendAt >= this.repeatMs)
+    ) {
+      this.onDirection(direction);
+      this._lastSendDirection = direction;
+      this._lastSendAt = now;
     }
   }
 
   _currentDirection() {
-    const up = this._isPressed('ArrowUp', 'KeyW');
-    const down = this._isPressed('ArrowDown', 'KeyS');
-    const left = this._isPressed('ArrowLeft', 'KeyA');
-    const right = this._isPressed('ArrowRight', 'KeyD');
-
-    if (up && !down) return 'UP';
-    if (down && !up) return 'DOWN';
-    if (left && !right) return 'LEFT';
-    if (right && !left) return 'RIGHT';
-    return null;
+    const directions = [];
+    if (this._isPressed('ArrowUp', 'KeyW') && !this._isPressed('ArrowDown', 'KeyS')) {
+      directions.push('UP');
+    }
+    if (this._isPressed('ArrowDown', 'KeyS') && !this._isPressed('ArrowUp', 'KeyW')) {
+      directions.push('DOWN');
+    }
+    if (this._isPressed('ArrowLeft', 'KeyA') && !this._isPressed('ArrowRight', 'KeyD')) {
+      directions.push('LEFT');
+    }
+    if (this._isPressed('ArrowRight', 'KeyD') && !this._isPressed('ArrowLeft', 'KeyA')) {
+      directions.push('RIGHT');
+    }
+    return directions;
   }
 
   _isPressed(...codes) {
@@ -78,5 +105,12 @@ export class KeyboardCtrlRepeater {
   }
 }
 
-export default KeyboardCtrlRepeater;
+function directionsEqual(a = [], b = []) {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i += 1) {
+    if (a[i] !== b[i]) return false;
+  }
+  return true;
+}
 
+export default KeyboardCtrlRepeater;
