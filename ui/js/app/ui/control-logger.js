@@ -4,7 +4,7 @@ function formatNumber(value, digits = 2) {
 }
 
 export function createControlLogger() {
-  let lastDirection = null;
+  let lastDirection = [];
   let lastStateLog = 0;
   let lastSend = { command: null, time: 0 };
 
@@ -25,14 +25,18 @@ export function createControlLogger() {
       } else if (type === 'keyup') {
         console.info(`[ctrl/input] keyup ${key} (active: ${active})`);
       } else if (type === 'direction') {
-        if (direction !== lastDirection) {
-          console.info(`[ctrl/input] direction -> ${direction}`);
-          lastDirection = direction;
+        const dirList = Array.isArray(direction) ? direction : direction ? [direction] : [];
+        const changed =
+          dirList.length !== lastDirection.length ||
+          dirList.some((value, idx) => value !== lastDirection[idx]);
+        if (changed) {
+          console.info(`[ctrl/input] direction -> ${dirList.join('+') || 'none'}`);
+          lastDirection = dirList;
         }
       } else if (type === 'idle') {
-        if (lastDirection !== null) {
+        if (lastDirection.length) {
           console.info('[ctrl/input] direction cleared (no active command)');
-          lastDirection = null;
+          lastDirection = [];
         }
       }
     },
@@ -62,11 +66,16 @@ export function createControlLogger() {
       lastStateLog = t;
       const latencyText =
         metrics.latencyMs == null ? 'n/a' : `${metrics.latencyMs.toFixed(1)}ms`;
-      const posX = formatNumber(state?.x);
-      const posY = formatNumber(state?.y);
-      const theta = formatNumber(state?.theta, 3);
+      const pose = state?.pose || {};
+      const velocity = state?.velocity || {};
+      const posX = formatNumber(pose.x);
+      const posY = formatNumber(pose.y);
+      const heading = formatNumber(pose.heading, 3);
+      const linear = formatNumber(velocity.linear);
+      const angular = formatNumber(velocity.angular, 3);
+      const lastCtrlSeq = state?.last_ctrl?.seq ?? 'n/a';
       console.debug(
-        `[ctrl/state] recv #${metrics.stateCount} latency=${latencyText} pos=(${posX}, ${posY}) theta=${theta}`,
+        `[ctrl/state] recv #${metrics.stateCount} latency=${latencyText} pos=(${posX}, ${posY}) heading=${heading} vel=(lin:${linear}, ang:${angular}) last_ctrl_seq=${lastCtrlSeq}`,
       );
     },
 
@@ -75,4 +84,3 @@ export function createControlLogger() {
     },
   };
 }
-

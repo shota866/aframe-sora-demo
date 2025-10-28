@@ -30,14 +30,14 @@ export function createHud() {
 
   function setPose(state) {
     if (!poseEl || !state) return;
-    const x = Number(state.x);
-    const y = Number(state.y);
-    const theta = Number(state.theta);
+    const pose = state.pose || {};
+    const x = Number(pose.x);
+    const y = Number(pose.y);
+    const heading = Number(pose.heading);
     const safe = (value, digits = 1) =>
       Number.isFinite(value) ? value.toFixed(digits) : 'n/a';
-    poseEl.textContent = `pos: ${safe(x)} ${safe(y)} | theta: ${safe(theta, 3)}`;
+    poseEl.textContent = `pos: ${safe(x)} ${safe(y)} | heading: ${safe(heading, 3)}`;
   }
 
   return { setConnection, setMetrics, setPose };
 }
-

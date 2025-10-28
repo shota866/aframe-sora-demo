@@ -51,7 +51,7 @@ class DataChannelMessageHandler:
             return
         msg_type = payload.get("t") or payload.get("type")
         msg_type_norm = msg_type.lower() if isinstance(msg_type, str) else None
-        LOGGER.info("msg_type=%s label=%s ", msg_type, label)
+        LOGGER.info("msg_type=%s label=%s", msg_type, label)
         if msg_type_norm in {"cmd", "ctrl"} and label == self._ctrl_label:
             self._handle_ctrl(payload)
         elif msg_type_norm == "hb":
@@ -69,6 +69,10 @@ class DataChannelMessageHandler:
         if not isinstance(seq, int):
             LOGGER.warning("ctrl without seq: %s", msg)
             return
+        if isinstance(command, str):
+            LOGGER.info("ctrl recv seq=%s command=%s", seq, command)
+        else:
+            LOGGER.info("ctrl recv seq=%s command=%s", seq, command)
         throttle = steer = brake = 0.0
         mode = "arcade"
         if isinstance(command, str):
@@ -90,7 +94,7 @@ class DataChannelMessageHandler:
 
         now_mono = time.perf_counter()
         client_ts_ms: Optional[float] = None
-        for key in ("ts", "t"):
+        for key in ("sent_at_ms", "ts", "t"):
             ts_candidate = msg.get(key)
             if isinstance(ts_candidate, (int, float)):
                 client_ts_ms = float(ts_candidate)

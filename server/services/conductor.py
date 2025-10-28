@@ -145,6 +145,18 @@ class Conductor:
     def _send_state(self, obj: Dict[str, object]) -> None:
         if not obj:
             return
+        if LOGGER.isEnabledFor(logging.INFO):
+            pose = obj.get("pose") or {}
+            velocity = obj.get("velocity") or {}
+            LOGGER.info(
+                "state seq=%s pos=(%s,%s) heading=%s vel=(lin:%s,ang:%s)",
+                obj.get("seq"),
+                pose.get("x"),
+                pose.get("y"),
+                pose.get("heading"),
+                velocity.get("linear"),
+                velocity.get("angular"),
+            )
         payload_json = json.dumps(obj, separators=(",", ":"))
         preview = payload_json
         if len(preview) > 512:

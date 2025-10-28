@@ -198,17 +198,21 @@ class StateReceiver:
             return
 
         seq = payload.get("seq")
+        sent_at_ms = payload.get("sent_at_ms")
         pose = payload.get("pose") or {}
-        vel = payload.get("vel") or {}
+        velocity = payload.get("velocity") or {}
         status = payload.get("status") or {}
+        last_ctrl = payload.get("last_ctrl") or {}
         LOGGER.info(
-            "state seq=%s x=%s z=%s yaw=%s vx=%s wz=%s status=%s",
+            "state seq=%s sent_at_ms=%s pos=(%s,%s) heading=%s vel=(lin:%s,ang:%s) last_ctrl_seq=%s status=%s",
             seq,
+            sent_at_ms,
             pose.get("x"),
-            pose.get("z"),
-            pose.get("yaw"),
-            vel.get("vx"),
-            vel.get("wz"),
+            pose.get("y"),
+            pose.get("heading"),
+            velocity.get("linear"),
+            velocity.get("angular"),
+            last_ctrl.get("seq"),
             status,
         )
 

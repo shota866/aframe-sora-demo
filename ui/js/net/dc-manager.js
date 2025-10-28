@@ -131,15 +131,16 @@ export class DataChannelManager {
     }
 
     const seq = this._nextCtrlSeq();
-    const ts = Date.now();
+    const sentAtMs = Date.now();
     if (!payload.type && typeof payload.t === 'string') {
       payload.type = payload.t;
     }
     payload.type = typeof payload.type === 'string' ? payload.type : 'cmd';
     payload.seq = seq;
-    payload.ts = ts;
+    payload.sent_at_ms = sentAtMs;
     delete payload.v;
     delete payload.t;
+    delete payload.ts;
 
     return encoder.encode(JSON.stringify(payload));
   }

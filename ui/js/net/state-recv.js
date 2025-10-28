@@ -94,13 +94,16 @@ class StateReceiver {
     this._lastSeq = seq;
 
     const now = performance.now();
-    if (this._timeOffset === null && typeof payload.t === 'number') {
-      this._timeOffset = now - payload.t;
+    if (this._timeOffset === null && typeof payload.sent_at_ms === 'number') {
+      this._timeOffset = now - payload.sent_at_ms;
     }
 
     const entry = {
       seq,
-      time: typeof payload.t === 'number' && this._timeOffset !== null ? payload.t + this._timeOffset : now,
+      time:
+        typeof payload.sent_at_ms === 'number' && this._timeOffset !== null
+          ? payload.sent_at_ms + this._timeOffset
+          : now,
       state: payload,
     };
     this._buffer.push(entry);
@@ -169,41 +172,54 @@ class StateReceiver {
   }
 
   _interpolate(a, b, t) {
+    const poseA = a.pose || {};
+    const poseB = b.pose || {};
+    const velA = a.velocity || {};
+    const velB = b.velocity || {};
+    const origin = b || a;
     return {
       type: 'state',
       seq: b.seq,
-      t: lerp(a.t, b.t, t),
+      sent_at_ms: Math.round(lerp(a.sent_at_ms ?? 0, b.sent_at_ms ?? 0, t)),
       pose: {
-        x: lerp(a.pose.x, b.pose.x, t),
-        y: lerp(a.pose.y, b.pose.y, t),
-        z: lerp(a.pose.z, b.pose.z, t),
-        yaw: lerpAngle(a.pose.yaw, b.pose.yaw, t),
+        x: lerp(poseA.x ?? 0, poseB.x ?? 0, t),
+        y: lerp(poseA.y ?? 0, poseB.y ?? 0, t),
+        heading: lerpAngle(poseA.heading ?? 0, poseB.heading ?? 0, t),
       },
-      vel: {
-        vx: lerp(a.vel.vx, b.vel.vx, t),
-        wz: lerp(a.vel.wz, b.vel.wz, t),
+      velocity: {
+        linear: lerp(velA.linear ?? 0, velB.linear ?? 0, t),
+        angular: lerp(velA.angular ?? 0, velB.angular ?? 0, t),
       },
-      status: b.status ? JSON.parse(JSON.stringify(b.status)) : a.status ? JSON.parse(JSON.stringify(a.status)) : undefined,
-      sim: b.sim ? JSON.parse(JSON.stringify(b.sim)) : a.sim ? JSON.parse(JSON.stringify(a.sim)) : undefined,
+      status: origin.status ? JSON.parse(JSON.stringify(origin.status)) : undefined,
+      last_ctrl: origin.last_ctrl ? JSON.parse(JSON.stringify(origin.last_ctrl)) : undefined,
+      step: origin.step ? JSON.parse(JSON.stringify(origin.step)) : undefined,
     };
   }
 
   _extrapolate(base, dt) {
-    const yaw = wrapAngle(base.pose.yaw + (base.vel.wz || 0) * dt);
-    const distance = (base.vel.vx || 0) * dt;
+    const baseHeading = base.pose?.heading ?? 0;
+    const angular = base.velocity?.angular ?? 0;
+    const linear = base.velocity?.linear ?? 0;
+    const heading = wrapAngle(baseHeading + angular * dt);
+    const distance = linear * dt;
+    const baseX = base.pose?.x ?? 0;
+    const baseY = base.pose?.y ?? 0;
     return {
       type: 'state',
       seq: base.seq,
-      t: base.t + dt * 1000,
+      sent_at_ms: (base.sent_at_ms || 0) + dt * 1000,
       pose: {
-        x: base.pose.x + Math.sin(yaw) * distance,
-        y: base.pose.y,
-        z: base.pose.z + Math.cos(yaw) * distance,
-        yaw,
+        x: baseX + Math.sin(heading) * distance,
+        y: baseY + Math.cos(heading) * distance,
+        heading,
       },
-      vel: { vx: base.vel.vx, wz: base.vel.wz },
+      velocity: {
+        linear,
+        angular,
+      },
       status: base.status ? JSON.parse(JSON.stringify(base.status)) : undefined,
-      sim: base.sim ? JSON.parse(JSON.stringify(base.sim)) : undefined,
+      last_ctrl: base.last_ctrl ? JSON.parse(JSON.stringify(base.last_ctrl)) : undefined,
+      step: base.step ? JSON.parse(JSON.stringify(base.step)) : undefined,
     };
   }
 
@@ -224,8 +240,11 @@ class StateReceiver {
   }
 
   _deriveHeartbeatAge() {
-    if (this._lastHeartbeatPayload && typeof this._lastHeartbeatPayload.hb_age === 'number') {
-      return Math.max(0, this._lastHeartbeatPayload.hb_age * 1000);
+    if (
+      this._lastHeartbeatPayload &&
+      typeof this._lastHeartbeatPayload.hb_age_ms === 'number'
+    ) {
+      return Math.max(0, this._lastHeartbeatPayload.hb_age_ms);
     }
     const wall = this._lastMessageWall;
     if (!wall) return null;

@@ -132,62 +132,116 @@ class RaspberryPiStatePublisher(Conductor):
             return None
 
     def _normalise_state(self, raw: Mapping[str, object]) -> Optional[dict[str, object]]:
-        payload: dict[str, object]
-        msg_type = raw.get("type")
-        if isinstance(msg_type, str) and msg_type.lower() == "state":
-            payload = dict(raw)
-        else:
+        msg_type_raw = raw.get("type")
+        msg_type = msg_type_raw.lower() if isinstance(msg_type_raw, str) else None
+        payload: dict[str, object] = dict(raw) if msg_type == "state" else {"type": "state"}
+
+        if msg_type != "state":
             pose_raw = raw.get("pose")
             vel_raw = raw.get("vel")
             if not isinstance(pose_raw, Mapping):
                 LOGGER.warning("state missing 'pose': %s", raw)
                 return None
-            if vel_raw is not None and not isinstance(vel_raw, Mapping):
-                LOGGER.warning("state has invalid 'vel': %s", raw)
-                return None
             pose = {
                 "x": _as_float(pose_raw.get("x"), 0.0),
-                "y": _as_float(pose_raw.get("y"), 0.0),
-                "z": _as_float(pose_raw.get("z"), 0.0),
-                "yaw": _as_float(pose_raw.get("yaw"), 0.0),
+                "y": _as_float(pose_raw.get("z"), 0.0),
+                "heading": _as_float(pose_raw.get("yaw"), 0.0),
             }
             vel = {
-                "vx": _as_float(vel_raw.get("vx"), 0.0) if isinstance(vel_raw, Mapping) else 0.0,
-                "wz": _as_float(vel_raw.get("wz"), 0.0) if isinstance(vel_raw, Mapping) else 0.0,
+                "linear": _as_float(vel_raw.get("vx"), 0.0) if isinstance(vel_raw, Mapping) else 0.0,
+                "angular": _as_float(vel_raw.get("wz"), 0.0) if isinstance(vel_raw, Mapping) else 0.0,
             }
             status_raw = raw.get("status")
             status = dict(status_raw) if isinstance(status_raw, Mapping) else {"ok": True, "msg": "ok"}
-            sim_raw = raw.get("sim")
-            sim = dict(sim_raw) if isinstance(sim_raw, Mapping) else {}
-            payload = {
-                "type": "state",
-                "pose": pose,
-                "vel": vel,
-                "status": status,
-                "sim": sim,
-            }
-            for key, value in raw.items():
-                if key not in {"type", "pose", "vel", "status", "sim", "seq", "t"}:
-                    payload[key] = value
-            for key in ("x", "y", "theta", "vx", "wz"):
-                if key in raw:
-                    payload[key] = raw[key]
-        payload["type"] = "state"
-        payload["seq"] = self._next_state_seq()
-        payload["t"] = int(time.time() * 1000.0)
+            payload.update(
+                {
+                    "pose": pose,
+                    "velocity": vel,
+                    "status": status,
+                    "step": {"dt_sec": _as_float(raw.get("dt_sec"), 0.0)},
+                }
+            )
 
-        pose = payload.get("pose")
-        vel = payload.get("vel")
-        if isinstance(pose, Mapping):
-            payload["x"] = _as_float(pose.get("x"), payload.get("x", 0.0))
-            # NOTE: For legacy 2D clients, map the 3D 'z' coordinate (depth) to the 2D 'y' coordinate.
-            # The 'pose' object uses a 3D coordinate system (X-Z plane for ground),
-            # while the top-level keys provide a flattened 2D view (X-Y plane).
-            payload["y"] = _as_float(pose.get("z"), payload.get("y", 0.0))
-            payload["theta"] = _as_float(pose.get("yaw"), payload.get("theta", 0.0))
-        if isinstance(vel, Mapping):
-            payload["vx"] = _as_float(vel.get("vx"), payload.get("vx", 0.0))
-            payload["wz"] = _as_float(vel.get("wz"), payload.get("wz", 0.0))
+        payload["type"] = "state"
+
+        if "seq" not in payload or not isinstance(payload["seq"], int):
+            payload["seq"] = self._next_state_seq()
+
+        now_ms = int(time.time() * 1000.0)
+        if "sent_at_ms" not in payload:
+            legacy_t = payload.pop("t", None)
+            if isinstance(legacy_t, (int, float)):
+                payload["sent_at_ms"] = int(legacy_t)
+            else:
+                payload["sent_at_ms"] = now_ms
+        else:
+            payload.pop("t", None)
+
+        # Ensure mandatory sections follow the new schema.
+        pose_payload = payload.get("pose")
+        if not isinstance(pose_payload, Mapping):
+            pose_payload = {}
+            payload["pose"] = pose_payload
+        pose_payload.setdefault("x", _as_float(payload.get("x"), 0.0))
+        pose_payload.setdefault("y", _as_float(payload.get("y"), 0.0))
+        if "heading" not in pose_payload:
+            if "theta" in payload:
+                pose_payload["heading"] = _as_float(payload["theta"], 0.0)
+            elif isinstance(pose_payload.get("yaw"), (int, float)):
+                pose_payload["heading"] = _as_float(pose_payload.get("yaw"), 0.0)
+            else:
+                pose_payload["heading"] = 0.0
+
+        velocity_payload = payload.get("velocity")
+        if not isinstance(velocity_payload, Mapping):
+            velocity_payload = {}
+            payload["velocity"] = velocity_payload
+
+        vx_legacy = payload.get("vx")
+        wz_legacy = payload.get("wz")
+        if "linear" not in velocity_payload:
+            if isinstance(vx_legacy, (int, float)):
+                velocity_payload["linear"] = _as_float(vx_legacy, 0.0)
+            else:
+                legacy_vel = payload.get("vel")
+                if isinstance(legacy_vel, Mapping) and "vx" in legacy_vel:
+                    velocity_payload["linear"] = _as_float(legacy_vel["vx"], 0.0)
+                else:
+                    velocity_payload["linear"] = 0.0
+        if "angular" not in velocity_payload:
+            if isinstance(wz_legacy, (int, float)):
+                velocity_payload["angular"] = _as_float(wz_legacy, 0.0)
+            else:
+                legacy_vel = payload.get("vel")
+                if isinstance(legacy_vel, Mapping) and "wz" in legacy_vel:
+                    velocity_payload["angular"] = _as_float(legacy_vel["wz"], 0.0)
+                else:
+                    velocity_payload["angular"] = 0.0
+
+        step_payload = payload.get("step")
+        if not isinstance(step_payload, Mapping):
+            step_payload = {}
+            payload["step"] = step_payload
+        sim_raw = payload.get("sim")
+        if "dt_sec" not in step_payload:
+            if isinstance(step_payload.get("dt"), (int, float)):
+                step_payload["dt_sec"] = _as_float(step_payload.get("dt"), 0.0)
+            elif isinstance(sim_raw, Mapping) and "dt" in sim_raw:
+                step_payload["dt_sec"] = _as_float(sim_raw["dt"], 0.0)
+            else:
+                step_payload["dt_sec"] = 0.0
+        if "dt" in step_payload:
+            step_payload.pop("dt")
+
+        status_payload = payload.get("status")
+        if isinstance(status_payload, Mapping):
+            if "hb_age_ms" not in status_payload and "hb_age" in status_payload:
+                status_payload["hb_age_ms"] = _as_float(status_payload.pop("hb_age"), 0.0) * 1000.0
+
+        # Remove legacy duplicates to keep payload compact.
+        for legacy_key in ("x", "y", "theta", "vx", "wz", "vel", "sim"):
+            payload.pop(legacy_key, None)
+
         return payload
 
 
