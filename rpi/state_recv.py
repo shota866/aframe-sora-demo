@@ -9,7 +9,10 @@ import signal
 import sys
 import threading
 from pathlib import Path
-from typing import Iterable, List, Optional
+from typing import Iterable, List, Optional, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from bridge import CommandSubscriber
 
 from dotenv import load_dotenv
 from sora_sdk import Sora, SoraConnection, SoraSignalingErrorCode
@@ -73,6 +76,7 @@ class StateReceiver:
         metadata: Optional[dict] = None,
         debug: bool = False,
         connect_timeout: float = 10.0,
+        cmd_vel_subscriber: Optional["CommandSubscriber"] = None,
     ) -> None:
         self.signaling_urls = list(signaling_urls)
         self.channel_id = channel_id
@@ -81,6 +85,7 @@ class StateReceiver:
         self.metadata = metadata
         self.debug = debug
         self.connect_timeout = connect_timeout
+        self._cmd_vel_subscriber = cmd_vel_subscriber
 
         self._sora = Sora()
         self._conn: Optional[SoraConnection] = None
@@ -216,6 +221,12 @@ class StateReceiver:
             status,
         )
 
+        if self._cmd_vel_subscriber is not None:
+            try:
+                self._cmd_vel_subscriber.process_payload(payload)
+            except Exception:  # noqa: BLE001
+                LOGGER.exception("failed to publish cmd_vel command")
+
     def _on_disconnect(self, code: SoraSignalingErrorCode, msg: str) -> None:
         LOGGER.info("Sora disconnected: code=%s msg=%s", code, msg)
         self._closed.set()
@@ -229,6 +240,41 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--log-level", default="INFO", help="Logging level (default: INFO)")
     parser.add_argument("--debug", action="store_true", help="Enable verbose Sora logging")
     parser.add_argument("--connect-timeout", type=float, default=10.0, help="Connection timeout (seconds)")
+    parser.add_argument(
+        "--publish-cmd-vel",
+        action="store_true",
+        help="Publish last_ctrl commands to a ROS 2 cmd_vel topic",
+    )
+    parser.add_argument("--cmd-vel-topic", default="/cmd_vel", help="ROS 2 topic name (default: /cmd_vel)")
+    parser.add_argument(
+        "--cmd-vel-node-name",
+        default="smagv_cmd_vel_bridge",
+        help="ROS 2 node name used for cmd_vel publishing",
+    )
+    parser.add_argument(
+        "--max-linear-speed",
+        type=float,
+        default=0.3,
+        help="Maximum linear speed in m/s for throttle=±1.0",
+    )
+    parser.add_argument(
+        "--max-angular-speed",
+        type=float,
+        default=-0.3,
+        help="Maximum angular speed in rad/s for steer=±1.0",
+    )
+    parser.add_argument(
+        "--brake-threshold",
+        type=float,
+        default=0.1,
+        help="Brake value above which cmd_vel output is forced to zero",
+    )
+    parser.add_argument(
+        "--command-timeout",
+        type=float,
+        default=0.5,
+        help="Seconds before cmd_vel output falls back to zero if no new command arrives",
+    )
     return parser
 
 
@@ -261,6 +307,44 @@ def main(argv: Optional[List[str]] = None) -> int:
         except json.JSONDecodeError as exc:
             parser.error(f"SORA_METADATA is invalid JSON: {exc}")
 
+    cmd_vel_publisher = None
+    cmd_vel_subscriber: Optional["CommandSubscriber"] = None
+    if args.publish_cmd_vel:
+        try:
+            try:
+                from .bridge import CommandConverter, CmdVelPublisher, CommandSubscriber
+            except ImportError:
+                from bridge import CommandConverter, CmdVelPublisher, CommandSubscriber  # type: ignore[assignment]
+        except ImportError as exc:  # pragma: no cover - import happens at runtime only
+            parser.error(f"bridge modules unavailable: {exc}")
+
+        try:
+            converter = CommandConverter(
+                max_linear_speed=args.max_linear_speed,
+                max_angular_speed=args.max_angular_speed,
+                brake_threshold=args.brake_threshold,
+            )
+            cmd_vel_publisher = CmdVelPublisher(
+                node_name=args.cmd_vel_node_name,
+                topic=args.cmd_vel_topic,
+            )
+            cmd_vel_publisher.start()
+            cmd_vel_subscriber = CommandSubscriber(
+                cmd_vel_publisher,
+                converter,
+                command_timeout_sec=args.command_timeout,
+            )
+            LOGGER.info(
+                "cmd_vel bridge enabled: topic=%s linear<=%.2f angular<=%.2f timeout=%.2fs",
+                args.cmd_vel_topic,
+                args.max_linear_speed,
+                args.max_angular_speed,
+                args.command_timeout,
+            )
+        except Exception as exc:  # noqa: BLE001
+            LOGGER.error("could not initialize cmd_vel bridge: %s", exc)
+            return 1
+
     receiver = StateReceiver(
         signaling_urls=signaling_urls,
         channel_id=channel_id,
@@ -269,6 +353,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         metadata=metadata,
         debug=args.debug,
         connect_timeout=args.connect_timeout,
+        cmd_vel_subscriber=cmd_vel_subscriber,
     )
 
     def _handle_signal(signum: int, _frame) -> None:
@@ -289,6 +374,10 @@ def main(argv: Optional[List[str]] = None) -> int:
         LOGGER.info("interrupted by user")
     finally:
         receiver.disconnect()
+        if cmd_vel_subscriber is not None:
+            cmd_vel_subscriber.close()
+        if cmd_vel_publisher is not None:
+            cmd_vel_publisher.stop()
 
     return 0
 
