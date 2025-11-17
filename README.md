@@ -17,15 +17,12 @@ Unified workspace containing the Web UI and Python manager used for Sora data ch
         - source .venv/bin/activate
         - python3 -m server.main／python3 -m server.main --log-level DEBUG（ログ出力多め）
     - ラズパイ(Ubuntu)ログ表示
-        - ラズパイにsshログイン：ssh [tsunogayashouta@shotapi.local](mailto:tsunogayashouta@shotapi.local)
-            - ログインできない時はmac側でssh-keygen -R shotapi.local打つといける
+        - ラズパイにsshログイン：ssh tsunogayashouta@192.168.197.146(ssh tsunogayashouta@shotapi.local)
         - cd aframe-manager-demo2/
-        - 仮想環境を有効化：source ~/venv-sora/bin/activate
-        - python3 rpi/state_recv.py --log-level INFO
-    - ROSノード立ち上げ
-        - source ~/venv-sora/bin/activate
-        - cd aframe-manager-demo2/
-        - python3 rpi/state_recv.py --publish-cmd-vel
+        - ROSを読み込む：source /opt/ros/jazzy/setup.bash
+        - ROS_DOMAINを合わせる：export ROS_DOMAIN_ID=10
+        - ラズパイ → Jetsonにcmd_velを送るノードを起動：python3 rpi/state_recv.py --publish-cmd-vel --cmd-vel-topic /cmd_vel
+
 ```
 ### Web UI
 
