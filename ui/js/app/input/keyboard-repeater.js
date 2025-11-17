@@ -6,7 +6,7 @@ export class KeyboardCtrlRepeater {
     this.onDirection = options.onDirection;
     this.onInputChange = typeof options.onInputChange === 'function' ? options.onInputChange : null;
     this.intervalMs = Math.max(10, Math.round(1000 / this.hz));
-    this.repeatMs = Math.max(10, Number(options.repeatMs) || 120);
+    this.repeatMs = Math.max(10, Number(options.repeatMs) || 60);
     this.keys = new Set();
     this.timer = null;
     this._lastDirection = [];

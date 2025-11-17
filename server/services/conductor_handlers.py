@@ -47,7 +47,7 @@ class DataChannelMessageHandler:
         try:
             payload = json.loads(data.decode("utf-8"))
         except json.JSONDecodeError:
-            LOGGER.warning("drop malformed json on %s", label)
+            LOGGER.warning("drop malformed json on %s: %s", label, data[:128])
             return
         msg_type = payload.get("t") or payload.get("type")
         msg_type_norm = msg_type.lower() if isinstance(msg_type, str) else None
@@ -59,7 +59,7 @@ class DataChannelMessageHandler:
         elif msg_type_norm == "estop":
             self._handle_estop(payload)
         else:
-            LOGGER.debug("ignore message type=%s label=%s", msg_type, label)
+            LOGGER.debug("ignore message type=%s label=%s expected_ctrl=%s", msg_type, label, self._ctrl_label)
             
     # コントロールメッセージを処理するメソッド
     def _handle_ctrl(self, msg: Dict[str, object]) -> None:
@@ -67,7 +67,7 @@ class DataChannelMessageHandler:
         command = msg.get("command")
 
         if not isinstance(seq, int):
-            LOGGER.warning("ctrl without seq: %s", msg)
+            LOGGER.warning("ctrl without seq or invalid seq type: %s", msg)
             return
         if isinstance(command, str):
             LOGGER.info("ctrl recv seq=%s command=%s", seq, command)
@@ -77,9 +77,7 @@ class DataChannelMessageHandler:
         mode = "arcade"
         if isinstance(command, str):
             preset = SIMPLE_COMMAND_PRESETS.get(command.upper())#受け取った操作コマンドをSIMPLE_COMMAND_PRESETSに照らして、throttle（前進）,steer（操舵）,brakeの値に変換する
-            if not preset:
-                LOGGER.warning("unknown ctrl command=%s payload=%s", command, msg)
-                return
+            
             throttle = clamp(float(preset.get("throttle", 0.0)), -1.0, 1.0)
             steer = clamp(float(preset.get("steer", 0.0)), -1.0, 1.0)
             brake = clamp(float(preset.get("brake", 0.0)), 0.0, 1.0)
@@ -104,6 +102,7 @@ class DataChannelMessageHandler:
         latency_ms = None
         if client_ts_ms is not None:
             latency_ms = now_wall * 1000.0 - client_ts_ms
+        manager_recv_at_ms = int(now_wall * 1000.0)
 
         #コマンド情報をControlSnapshotに保存
         snapshot = ControlSnapshot(
@@ -114,10 +113,16 @@ class DataChannelMessageHandler:
             mode=mode,
             received_at=now_mono,
             client_timestamp_ms=int(client_ts_ms) if client_ts_ms is not None else None,
+            manager_recv_at_ms=manager_recv_at_ms,
         )
 
         if not self._control_state.update_if_new(snapshot, latency_ms, now_wall):
             self._stats_tracker.inc_ctrl_drop()
+            LOGGER.debug(
+                "drop ctrl seq=%s (stale?). last_seq=%s",
+                seq,
+                self._control_state.get_last_ctrl().seq if self._control_state.get_last_ctrl() else None,
+            )
             return
 
         self._stats_tracker.inc_ctrl_recv()

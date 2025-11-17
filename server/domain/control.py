@@ -37,6 +37,7 @@ class ControlSnapshot:
     mode: str
     received_at: float
     client_timestamp_ms: Optional[int]
+    manager_recv_at_ms: Optional[int] = None
 
     def age(self, now: float) -> float:
         return now - self.received_at
@@ -50,4 +51,3 @@ __all__ = [
     "CTRL_HOLD_SEC",
     "CTRL_DAMP_SEC",
 ]
-

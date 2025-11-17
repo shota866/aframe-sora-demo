@@ -1,4 +1,5 @@
 #soraという外部サービスへの橋渡しを行うためのアダプタ
+#WebRTCサーバーSora SDKのラッパー
 from __future__ import annotations
 
 from dataclasses import dataclass

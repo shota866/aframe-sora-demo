@@ -149,14 +149,21 @@ class Conductor:
             pose = obj.get("pose") or {}
             velocity = obj.get("velocity") or {}
             LOGGER.info(
-                "state seq=%s pos=(%s,%s) heading=%s vel=(lin:%s,ang:%s)",
+                "state seq=%s last_ctrl=%s pos=(%s,%s) heading=%s vel=(lin:%s,ang:%s)",
                 obj.get("seq"),
+                obj.get("last_ctrl"),
                 pose.get("x"),
                 pose.get("y"),
                 pose.get("heading"),
                 velocity.get("linear"),
                 velocity.get("angular"),
             )
+        timeline = obj.get("timeline")
+        if isinstance(timeline, dict):
+            seq_value = obj.get("seq")
+            if seq_value is not None and "seq" not in timeline:
+                timeline["seq"] = seq_value
+            timeline["mgr_sent"] = int(time.time() * 1000.0)
         payload_json = json.dumps(obj, separators=(",", ":"))
         preview = payload_json
         if len(preview) > 512:

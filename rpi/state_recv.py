@@ -8,6 +8,7 @@ import os
 import signal
 import sys
 import threading
+import time
 from pathlib import Path
 from typing import Iterable, List, Optional, TYPE_CHECKING
 
@@ -226,6 +227,50 @@ class StateReceiver:
                 self._cmd_vel_subscriber.process_payload(payload)
             except Exception:  # noqa: BLE001
                 LOGGER.exception("failed to publish cmd_vel command")
+
+        timeline = payload.get("timeline")
+        if isinstance(timeline, dict):
+            timeline["pi_recv"] = int(time.time() * 1000.0)
+            seq_value = timeline.get("seq") or payload.get("seq")
+            ui_sent = timeline.get("ui_sent")
+            mgr_recv = timeline.get("mgr_recv")
+            mgr_sent = timeline.get("mgr_sent")
+            pi_recv = timeline.get("pi_recv")
+
+            def _delta_ms(start, end) -> Optional[int]:
+                if isinstance(start, (int, float)) and isinstance(end, (int, float)):
+                    return int(end - start)
+                return None
+
+            #各時刻
+            relative_ui_mgr = _delta_ms(ui_sent, mgr_recv)
+            relative_ui_mgr_sent = _delta_ms(ui_sent, mgr_sent)
+            relative_ui_pi_recv = _delta_ms(ui_sent, pi_recv)
+            manager_prcessing= _delta_ms(mgr_recv, mgr_sent)
+            relative_mgr_rpirecv= _delta_ms(relative_ui_mgr_sent, relative_ui_pi_recv)
+
+            deltas: list[str] = []
+            if relative_ui_mgr is not None:
+                deltas.append(f"ui_mrgrcv={relative_ui_mgr}ms")
+            if relative_ui_mgr_sent is not None:
+                deltas.append(f"ui_mgrsent={relative_ui_mgr_sent}ms")
+            if relative_ui_pi_recv is not None:
+                deltas.append(f"ui_pirecv={relative_ui_pi_recv}ms")
+            if manager_prcessing is not None:
+                deltas.append(f"mgr_proc={manager_prcessing}ms")
+            if relative_mgr_rpirecv is not None:
+                deltas.append(f"mgr_pirecv={relative_mgr_rpirecv}ms")
+            # Keep raw timeline JSON for later analysis even if human-readable summary omits mgr→pi
+
+            try:
+                raw_json = json.dumps(timeline, separators=(",", ":"))
+            except TypeError:
+                raw_json = str(timeline)
+
+            if deltas:
+                LOGGER.info("TIMELINE seq=%s %s raw=%s", seq_value, " ".join(deltas), raw_json)
+            else:
+                LOGGER.info("TIMELINE %s", raw_json)
 
     def _on_disconnect(self, code: SoraSignalingErrorCode, msg: str) -> None:
         LOGGER.info("Sora disconnected: code=%s msg=%s", code, msg)

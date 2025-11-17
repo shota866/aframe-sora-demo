@@ -42,9 +42,6 @@ class CommandSubscriber:
             return
 
         with self._lock:
-            if self._last_seq == seq:
-                self._last_publish_wall = time.time()
-                return
             self._last_seq = seq
 
         command = last_ctrl.get("command") or {}

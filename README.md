@@ -17,11 +17,22 @@ Unified workspace containing the Web UI and Python manager used for Sora data ch
         - source .venv/bin/activate
         - python3 -m server.main／python3 -m server.main --log-level DEBUG（ログ出力多め）
     - ラズパイ(Ubuntu)ログ表示
-        - ラズパイにsshログイン：ssh [tsunogayashouta@shotapi.local](mailto:tsunogayashouta@shotapi.local)
+        - ラズパイにsshログイン：
+            - ssh tsunogayashouta@shotapi.local
+            - (ssh tsunogayashouta@192.168.197.146)
             - ログインできない時はmac側でssh-keygen -R shotapi.local打つといける
+        - Ros2の環境を読み込む:source /opt/ros/jazzy/setup.bash
+        - 仮想環境を有効化：source ~/venv-sora-ros/bin/activate
         - cd aframe-manager-demo2/
-        - 仮想環境を有効化：source ~/venv-sora/bin/activate
-        - python3 rpi/state_recv.py --log-level INFO
+        - python3 rpi/state_recv.py --log-level INFO（遅延ログを出したい場合：python3 -m rpi.state_recv --log-level INFO 2>&1 | tee /tmp/state-recv.log）
+            - python3 rpi/state_recv.py \
+                --log-level INFO \
+                --publish-cmd-vel \
+                --max-linear-speed 0.3 \
+                --max-angular-speed -0.3 \
+                2>&1 | tee /tmp/state-recv.log
+
+            - tail -F /tmp/state-recv.log | rg --line-buffered 'TIMELINE'(遅延内容を別ターミナルで抜き出す)
     - ROSノード立ち上げ
         - source ~/venv-sora/bin/activate
         - cd aframe-manager-demo2/
