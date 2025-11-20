@@ -22,9 +22,9 @@ def wrap_angle(rad: float) -> float:
 SIMPLE_COMMAND_PRESETS: Dict[str, Dict[str, float]] = {
     "IDLE": {"throttle": 0.0, "steer": 0.0, "brake": 0.4},
     "UP": {"throttle": 0.9, "steer": 0.0, "brake": 0.0},
-    "DOWN": {"throttle": -0.5, "steer": 0.0, "brake": 0.0},
-    "LEFT": {"throttle": 0.6, "steer": -0.7, "brake": 0.0},
-    "RIGHT": {"throttle": 0.6, "steer": 0.7, "brake": 0.0},
+    "DOWN": {"throttle": -0.9, "steer": 0.0, "brake": 0.0},
+    "LEFT": {"throttle": 0.0, "steer": -0.7, "brake": 0.0},
+    "RIGHT": {"throttle": 0.0, "steer": 0.7, "brake": 0.0},
 }
 
 

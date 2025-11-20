@@ -17,7 +17,7 @@ Unified workspace containing the Web UI and Python manager used for Sora data ch
         - source .venv/bin/activate
         - python3 -m server.main／python3 -m server.main --log-level DEBUG（ログ出力多め）
     - ラズパイ(Ubuntu)ログ表示
-        - ラズパイにsshログイン：ssh tsunogayashouta@192.168.197.146(ssh tsunogayashouta@shotapi.local)
+        - ラズパイにsshログイン：ssh ssh tsunogayashouta@192.168.207.131(ssh tsunogayashouta@shotapi.local)
         - cd aframe-manager-demo2/
         - ROSを読み込む：source /opt/ros/jazzy/setup.bash
         - ROS_DOMAINを合わせる：export ROS_DOMAIN_ID=10
@@ -65,3 +65,16 @@ python server/rpi_state_publisher.py --stdin
 ```
 
 Add `--demo` to emit a circular trajectory when no external payloads are queued, or pipe your own JSON objects matching the existing `#state` schema.
+
+### RealSense → Sora video bridge
+
+`rpi/realsense/image_to_sora.py` subscribes to `/camera/color/image_raw`, shrinks each frame (default 320x180 @ 15 fps), and sends it to the Sora channel as a small thumbnail stream. Install `python3-opencv`, `ros-${ROS_DISTRO}-cv-bridge`, and the Sora Python SDK on the Raspberry Pi, then run:
+
+```
+python3 -m rpi.realsense.image_to_sora \
+  --signaling-url wss://example.signaling \
+  --channel your-channel \
+  --track-label camera-thumb
+```
+
+Set `SORA_SIGNALING_URLS` / `SORA_CHANNEL_ID` env vars (optionally via `.env`) instead of CLI flags if you prefer. Use `--ui-slot top-right` (default) so the Web UI can pin the thumbnail to the upper-right corner.

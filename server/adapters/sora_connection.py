@@ -2,10 +2,13 @@
 #WebRTCサーバーSora SDKのラッパー
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Callable, Mapping, Optional
 
 from sora_sdk import Sora, SoraConnection, SoraSignalingErrorCode
+
+LOGGER = logging.getLogger("manager.sora")
 
 #SDKの定義
 @dataclass(frozen=True)
@@ -32,6 +35,9 @@ def create_connection(
     handlers: SoraEventHandlers,
 ) -> SoraConnection:
     """Create and configure a Sora connection with pre-wired event handlers."""
+    LOGGER.info("create_connection() called with channel_id=%s", config.channel_id)
+    LOGGER.info("ctrl_label=%s state_label=%s", config.ctrl_label, config.state_label)
+
     conn = sora.create_connection(
         signaling_urls=config.signaling_urls,
         role="sendrecv",
@@ -70,4 +76,3 @@ def create_connection(
 
 
 __all__ = ["SoraConnectionConfig", "SoraEventHandlers", "create_connection"]
-
