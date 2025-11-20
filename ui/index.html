@@ -127,6 +127,20 @@
         margin-top: 4px;
         font-family: monospace;
       }
+      #cameraThumb {
+        position: absolute;
+        top: 70px;
+        right: 10px;
+        width: 240px;
+        height: 135px;
+        background: #000;
+        border-radius: 8px;
+        overflow: hidden;
+        object-fit: cover;
+        border: 2px solid rgba(255, 255, 255, 0.2);
+        box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+        z-index: 950;
+      }
       /* #logHint は削除に伴いCSSも削除 */
     </style>
   </head>
@@ -139,6 +153,7 @@
       <div id="poseInfo">pos: --</div>
     </div>
     <button id="eStopButton">E-Stop</button>
+    <video id="cameraThumb" autoplay playsinline muted hidden></video>
     <!-- ▼ ログ関連UIは削除：DLボタン / ヒント表示 -->
     <!-- <button id="dlLog">...</button> / <div id="logHint">...</div> を除去 -->
 

@@ -62,6 +62,7 @@ class SoraDataChannelClient {
     this._disconnectResolver = null;
     this._dummyStreamInfo = null;
     this._registeredChannels = new Map();
+    this._lastCtrlWarnAt = 0;
 
     this._events = new EventHub([
       'open',
@@ -72,6 +73,7 @@ class SoraDataChannelClient {
       'channel-close',
       'status',
       'heartbeat',
+      'track',
     ]);
 
     this._channels = new DataChannelManager(this);
@@ -82,6 +84,7 @@ class SoraDataChannelClient {
     this._onDataChannel = (event) => this._channels.handleDataChannel(event);
     this._onMessage = (event) => this._channels.handleMessage(event);
     this._onNotify = (event) => this._channels.handleNotify(event);
+    this._onTrack = (event) => this._emit('track', event);
   }
 
   connect() {
@@ -134,8 +137,16 @@ class SoraDataChannelClient {
     if (!message || typeof message !== 'object') {
       message = { command: message ?? null };
     }
-    if (!this._session || !this.isCtrlReady()) {
-      if (this.debug) console.warn('[sora] drop ctrl message (channel not ready)');
+    if (!this._session) {
+      this._maybeLogCtrlSkip('session not established');
+      return false;
+    }
+    if (!this.isCtrlReady()) {
+      const channelState = this._channels.ctrlChannel?.readyState || 'absent';
+      this._maybeLogCtrlSkip('ctrl channel not ready', {
+        channelState,
+        hasChannel: !!this._channels.ctrlChannel,
+      });
       return false;
     }
     try {
@@ -146,6 +157,17 @@ class SoraDataChannelClient {
     } catch (err) {
       this._emit('error', err);
       return false;
+    }
+  }
+
+  _maybeLogCtrlSkip(reason, context) {
+    const now = Date.now();
+    if (now - this._lastCtrlWarnAt < 500) return;
+    this._lastCtrlWarnAt = now;
+    if (context) {
+      console.warn(`[sora] sendCtrl skipped: ${reason}`, context);
+    } else {
+      console.warn(`[sora] sendCtrl skipped: ${reason}`);
     }
   }
 
@@ -189,8 +211,11 @@ class SoraDataChannelClient {
     return this.on('state', handler);
   }
 
+  onTrack(handler) {
+    return this.on('track', handler);
+  }
+
   _emit(event, payload) {
     this._events.emit(event, payload);
   }
 }
-

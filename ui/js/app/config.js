@@ -3,6 +3,7 @@ const DEFAULT_CONFIG = {
   channelId: 'aframe-demo',
   ctrlLabel: 'ctrl',
   stateLabel: 'state',
+  cameraTrackLabel: 'camera-thumb',
   metadata: null,
   debug: false,
   mode: 'net',
@@ -50,6 +51,8 @@ export function resolveConfig() {
   if (search.has('ctrl')) queryConfig.ctrlLabel = search.get('ctrl');
   if (search.has('state')) queryConfig.stateLabel = search.get('state');
   if (search.has('debug')) queryConfig.debug = search.get('debug') !== '0';
+  if (search.has('thumb')) queryConfig.cameraTrackLabel = search.get('thumb');
+  if (search.has('cameraTrack')) queryConfig.cameraTrackLabel = search.get('cameraTrack');
   if (search.has('local')) queryConfig.mode = search.get('local') === '1' ? 'local' : 'net';
 
   const merged = Object.assign({}, DEFAULT_CONFIG, envConfig, bodyConfig, globalConfig, queryConfig);
@@ -59,6 +62,7 @@ export function resolveConfig() {
   merged.localMode = String(merged.mode || '').toLowerCase() === 'local';
   merged.ctrlLabel = ensureLabel(merged.ctrlLabel, '#ctrl');
   merged.stateLabel = ensureLabel(merged.stateLabel, '#state');
+  merged.cameraTrackLabel = (merged.cameraTrackLabel || '').trim() || 'camera-thumb';
   return merged;
 }
 

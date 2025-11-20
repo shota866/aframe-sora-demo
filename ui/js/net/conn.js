@@ -48,7 +48,6 @@ export class ConnectionManager {
     const options = {
       audio: false,
       video: true,
-      multistream: true,
       spotlight: false,
       dataChannelSignaling: true,
       dataChannels,
@@ -62,6 +61,7 @@ export class ConnectionManager {
     session.on('datachannel', client._onDataChannel);
     session.on('message', client._onMessage);
     session.on('notify', client._onNotify);
+    session.on('track', client._onTrack);
 
     try {
       if (stream) {
@@ -143,6 +143,7 @@ export class ConnectionManager {
       session.on('datachannel', null);
       session.on('message', null);
       session.on('notify', null);
+      session.on('track', null);
     } catch (err) {
       if (this.client.debug) console.warn('[sora] unwire error', err);
     }

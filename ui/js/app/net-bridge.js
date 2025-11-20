@@ -3,6 +3,7 @@ import { KeyboardCtrlRepeater } from './input/keyboard-repeater.js';
 import { applyServerState } from '../scene/car-state.js';
 import { configureCarForNet } from '../scene/car-setup.js';
 import { createSoraClient } from '../net/sora-client.js';
+import { VideoThumbnail } from '../net/video-thumb.js';
 
 export function createNetBridge({ config, hud, controlLog, carEl }) {
   if (!hud) throw new Error('HUD instance required');
@@ -25,6 +26,20 @@ export function createNetBridge({ config, hud, controlLog, carEl }) {
     debug: config.debug,
   });
 
+  client.on('channel-open', ({ label }) => {
+    console.info(`[net] data channel open: ${label}`);
+  });
+
+  client.on('channel-close', ({ label }) => {
+    console.warn(`[net] data channel closed: ${label}`);
+  });
+
+  client.on('status', (info) => {
+    const state = info?.state || 'unknown';
+    const channels = info?.channels || {};
+    console.info('[net] client status update', { state, channels });
+  });
+
   const keyRepeater = new KeyboardCtrlRepeater({
     hz: CTRL_SEND_HZ,
     onInputChange: (event) => controlLog.input(event),
@@ -32,6 +47,15 @@ export function createNetBridge({ config, hud, controlLog, carEl }) {
   });
 
   configureCarForNet(carEl);
+
+  const videoThumb = new VideoThumbnail({
+    elementId: config.cameraElementId || 'cameraThumb',
+    trackLabel: config.cameraTrackLabel || 'camera-thumb',
+  });
+
+  client.onTrack((event) => {
+    videoThumb.handleTrack(event);
+  });
 
   client.onOpen(() => {
     metrics.ctrlCount = 0;
@@ -47,6 +71,7 @@ export function createNetBridge({ config, hud, controlLog, carEl }) {
   });
 
   client.onClose(() => {
+    videoThumb.clear();
     hud.setConnection('disconnected', ['connection closed']);
   });
 
@@ -117,6 +142,7 @@ export function createNetBridge({ config, hud, controlLog, carEl }) {
     },
     stop() {
       keyRepeater.stop();
+      videoThumb.clear();
       return client.disconnect();
     },
     handleDirection,
