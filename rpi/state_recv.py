@@ -324,8 +324,8 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Optional[List[str]] = None) -> int:
-    parser = _build_parser()
-    args = parser.parse_args(argv)
+    parser = _build_parser()#構文解析器の作成
+    args = parser.parse_args(argv)#引数の解析
 
     logging.basicConfig(
         level=getattr(logging, str(args.log_level).upper(), logging.INFO),

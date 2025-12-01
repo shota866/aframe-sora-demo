@@ -8,7 +8,12 @@ from dataclasses import dataclass
 from typing import Iterable, List, Mapping, Optional
 
 import numpy as np
-from sora_sdk import Sora, SoraConnection, SoraSignalingErrorCode, SoraVideoSource, VideoFrame
+from sora_sdk import (
+    Sora,
+    SoraConnection,
+    SoraSignalingErrorCode,
+    SoraVideoSource,
+)
 
 LOGGER = logging.getLogger(__name__)
 
@@ -51,7 +56,11 @@ class SoraVideoPublisher:
         if not self._signaling_urls:
             raise ValueError("signaling_urls must not be empty")
 
-        conn = self._sora.create_connection(
+        # 1) VideoSource を Sora から作る（新しい API）
+        self._source = self._sora.create_video_source()
+
+        # 2) Connection を VideoSource 付きで作る
+        self._conn = self._sora.create_connection(
             signaling_urls=self._signaling_urls,
             role="sendonly",
             channel_id=self._channel_id,
@@ -60,25 +69,21 @@ class SoraVideoPublisher:
             video=True,
             video_codec_type=self._video_config.codec,
             video_bit_rate=self._video_config.bit_rate,
+            video_source=self._source,   # ← 重要：ここに VideoSource を渡す
         )
 
+        conn = self._conn
         conn.on_set_offer = lambda raw: LOGGER.debug("set_offer: %s", raw)
         conn.on_notify = self._on_notify
         conn.on_disconnect = self._on_disconnect
 
-        source = conn.create_video_source(
-            width=self._video_config.width,
-            height=self._video_config.height,
-            fps=self._video_config.fps,
-            track_label=self._video_config.track_label,
-        )
-
-        self._conn = conn
-        self._source = source
-
+        # 3) 接続開始
         conn.connect()
+
+        # 4) タイムアウト待ち
         if not self._connected.wait(timeout=self._connect_timeout):
             raise TimeoutError("Sora connection timeout")
+
         LOGGER.info("Sora connected to channel %s", self._channel_id)
 
     def close(self) -> None:
@@ -92,7 +97,7 @@ class SoraVideoPublisher:
                 LOGGER.debug("disconnect raised", exc_info=True)
 
     def push_frame(self, frame: np.ndarray, *, timestamp_ns: int) -> bool:
-        """Convert ndarray to VideoFrame and push via SoraVideoSource."""
+        """Convert ndarray to soraVideoFrame and push via SoraVideoSource."""
         source = self._source
         if source is None:
             return False
@@ -102,9 +107,14 @@ class SoraVideoPublisher:
         if now - self._last_sent < min_interval:
             return False
 
-        video_frame = VideoFrame.from_ndarray(frame, format="bgr24")
-        video_frame.timestamp = timestamp_ns
-        source.push_frame(video_frame)
+        try:
+            # ここで numpy 配列をそのまま VideoSource に渡す
+            # ※ 実際のメソッド名は on_captured(...) のようなものになっているはず
+            source.on_captured(frame)
+        except Exception:
+            LOGGER.exception("failed to push frame")
+            return False
+
         self._last_sent = now
         return True
 

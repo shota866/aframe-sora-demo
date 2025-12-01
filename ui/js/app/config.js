@@ -62,7 +62,7 @@ export function resolveConfig() {
   merged.localMode = String(merged.mode || '').toLowerCase() === 'local';
   merged.ctrlLabel = ensureLabel(merged.ctrlLabel, '#ctrl');
   merged.stateLabel = ensureLabel(merged.stateLabel, '#state');
-  merged.cameraTrackLabel = (merged.cameraTrackLabel || '').trim() || 'camera-thumb';
+  merged.cameraTrackLabel = ensureLabel(merged.cameraTrackLabel, '#camera-thumb');
   return merged;
 }
 

@@ -36,7 +36,8 @@ class RealSenseImageSubscriber(Node):
             self._on_image,
             QoSPresetProfiles.SENSOR_DATA.value,
         )
-        self.get_logger().info("Subscribed to %s", topic)
+        self.get_logger().info(f"Subscribed to {topic}")
+
 
     def _on_image(self, msg: Image) -> None:
         try:
@@ -50,6 +51,6 @@ class RealSenseImageSubscriber(Node):
             now = time.monotonic()
             if now - self._last_drop_log > 5.0:
                 self.get_logger().warning(
-                    "Publisher backpressure: dropped %d frames", self._drop_count
+                    "Publisher backpressure: dropped frames"
                 )
                 self._last_drop_log = now

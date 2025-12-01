@@ -8,6 +8,7 @@ import logging
 import os
 import signal
 import sys
+import time
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -50,6 +51,13 @@ def _attach_ui_slot(metadata: Dict[str, object], ui_slot: Optional[str]) -> Dict
     video_meta.setdefault("ui_slot", ui_slot)
     metadata["video"] = video_meta
     return metadata
+
+
+def _normalise_label(value: Optional[str], fallback: str) -> str:
+    label = (value or "").strip()
+    if not label:
+        return fallback
+    return label if label.startswith("#") else f"#{label}"
 
 
 def _load_env_file(explicit: Optional[str] = None) -> Optional[Path]:
@@ -134,6 +142,9 @@ def main(argv: Optional[List[str]] = None) -> int:
         )
 
     metadata = _attach_ui_slot(_load_metadata(args.metadata, args.metadata_file), args.ui_slot)
+    track_label = _normalise_label(args.track_label, "camera-thumb")
+    LOGGER.info("Using Sora video track label: %s", track_label)
+
 
     video_cfg = VideoPublishConfig(
         width=args.width,
@@ -141,7 +152,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         fps=args.fps,
         codec=args.codec,
         bit_rate=args.bitrate,
-        track_label=args.track_label,
+        track_label=track_label,
     )
 
     publisher = SoraVideoPublisher(
@@ -162,14 +173,33 @@ def main(argv: Optional[List[str]] = None) -> int:
     signal.signal(signal.SIGTERM, _shutdown_handler)
 
     rclpy.init(args=None)
+    frame_counter = 0
+    last_log = time.monotonic()
+
+    def _handle_frame(frame, ts):
+        nonlocal frame_counter, last_log
+        frame_counter += 1
+        ok = publisher.push_frame(frame, timestamp_ns=ts)
+        now = time.monotonic()
+        if now - last_log >= 5.0:
+            LOGGER.info(
+                "Frame stats: processed=%d last_ts=%d last_push_ok=%s",
+                frame_counter,
+                ts,
+                ok,
+            )
+            frame_counter = 0
+            last_log = now
+
     node = RealSenseImageSubscriber(
         topic=args.topic,
         frame_converter=converter,
-        frame_handler=lambda frame, ts: publisher.push_frame(frame, timestamp_ns=ts),
+        frame_handler=_handle_frame,
     )
 
     try:
         publisher.connect()
+        LOGGER.info("Connected to %s, waiting for frames...", args.channel)
         rclpy.spin(node)
     except KeyboardInterrupt:
         LOGGER.info("Interrupted by user")

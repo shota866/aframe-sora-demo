@@ -33,9 +33,10 @@ export class VideoThumbnail {
   handleTrack(event) {
     if (!event || !event.track || event.track.kind !== 'video') return false;
     const trackLabel = event.track.label || event.track.id || '';
-    if (this.trackLabel && trackLabel !== this.trackLabel) return false;
+    console.info('[video-thumb] accepted track', trackLabel);
 
-    let stream = (event.streams && event.streams[0]) || this._currentStream;
+    // もともとのストリーム処理
+    let stream = this._currentStream || event.streams?.[0] || new MediaStream();
     if (!stream) {
       stream = new MediaStream();
     }
@@ -44,17 +45,58 @@ export class VideoThumbnail {
     }
 
     this._currentStream = stream;
-    this.videoEl.srcObject = stream;
+
+    // ★ ① 同じ stream なら srcObject を再設定しない
+    if (this.videoEl.srcObject !== stream) {
+      this.videoEl.srcObject = stream;
+    }
+
     this.videoEl.hidden = false;
+
     event.track.addEventListener('ended', () => {
       this._handleTrackEnded(event.track);
     });
-    const playPromise = this.videoEl.play();
-    if (playPromise?.catch) {
-      playPromise.catch((err) => console.warn('[video-thumb] autoplay failed', err));
+    console.info('[video-thumb] before play, hasPlayedOnce =', this._hasPlayedOnce);
+
+    // ★ ② play() は一度だけ実行
+    if (!this._hasPlayedOnce) {
+      const playResult = this.videoEl.play();
+      console.info('[video-thumb] play() called, result =', playResult);
+
+      if (playResult && typeof playResult.then === 'function') {
+        // Promise を返してくるブラウザ用
+        playResult
+          .then(() => {
+            console.info('[video-thumb] play started (promise resolved)');
+            this._hasPlayedOnce = true;
+          })
+          .catch((err) => {
+            console.warn('[video-thumb] autoplay failed (promise rejected)', err);
+            this._hasPlayedOnce = false;
+          });
+      } else {
+        // Promise を返さない古い/特殊なパターン用
+        console.info('[video-thumb] play() did not return a promise; assuming started');
+        this._hasPlayedOnce = true;
+      }
+      setTimeout(() => {
+        console.info(
+          '[video-thumb] video state',
+          {
+            paused: this.videoEl.paused,
+            readyState: this.videoEl.readyState,
+            videoWidth: this.videoEl.videoWidth,
+            videoHeight: this.videoEl.videoHeight,
+          },
+        );
+      }, 1000);
+
     }
+
+
     return true;
   }
+
 
   clear() {
     if (this.videoEl) {

@@ -54,6 +54,7 @@ export function createNetBridge({ config, hud, controlLog, carEl }) {
   });
 
   client.onTrack((event) => {
+    console.info('[net] track event', event?.track?.label, event);
     videoThumb.handleTrack(event);
   });
 
