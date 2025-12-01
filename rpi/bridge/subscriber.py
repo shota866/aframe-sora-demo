@@ -32,37 +32,43 @@ class CommandSubscriber:
         self._watchdog_thread = threading.Thread(target=self._watchdog_loop, daemon=True)
         self._watchdog_thread.start()
 
-    def process_payload(self, payload: Dict[str, object]) -> None:
-        last_ctrl = payload.get("last_ctrl")
-        if not isinstance(last_ctrl, dict):
-            return
-
-        seq = last_ctrl.get("seq")
-        if seq is None:
-            return
+    def process_ctrl_payload(self, payload: Dict[str, object]) -> None:
+        """
+        Handle UI -> rpi ctrl payloads.
+        Expected shape: {"t":"ctrl","seq":123,"command":"UP"} or
+        {"t":"ctrl","seq":123,"cmd":{"throttle":0.5,"steer":0,"brake":0}}.
+        """
+        seq = payload.get("seq")
+        command_raw = payload.get("command")
+        cmd_obj = payload.get("cmd") if isinstance(payload.get("cmd"), dict) else {}
+        throttle = float(cmd_obj.get("throttle") or 0.0)
+        steer = float(cmd_obj.get("steer") or 0.0)
+        brake = float(cmd_obj.get("brake") or 0.0)
+        estop_active = bool(payload.get("estop"))
 
         with self._lock:
-            self._last_seq = seq
-
-        command = last_ctrl.get("command") or {}
-        throttle = float(command.get("throttle") or 0.0)
-        steer = float(command.get("steer") or 0.0)
-        brake = float(command.get("brake") or 0.0)
-
-        status = payload.get("status") or {}
-        estop_active = bool(status.get("estop")) or not bool(status.get("ok", True))
+            if isinstance(seq, int):
+                self._last_seq = seq
 
         if estop_active:
             LOGGER.warning("estop active -> forcing cmd_vel=0")
 
         linear, angular = self._converter.to_velocity(
+            command_raw if isinstance(command_raw, str) else None,
+            throttle=throttle,
+            steer=steer,
+            brake=brake,
+            estop_active=estop_active,
+        )
+        LOGGER.info(
+            "cmd from UI seq=%s command=%s throttle=%.3f steer=%.3f brake=%.3f -> linear=%.3f angular=%.3f",
+            seq,
+            command_raw,
             throttle,
             steer,
             brake,
-            estop_active=estop_active,
-        )
-        LOGGER.debug(
-            "publishing cmd_vel: linear=%.3f angular=%.3f", linear, angular
+            linear,
+            angular,
         )
         self._publisher.publish(linear, angular)
 

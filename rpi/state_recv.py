@@ -8,7 +8,6 @@ import os
 import signal
 import sys
 import threading
-import time
 from pathlib import Path
 from typing import Iterable, List, Optional, TYPE_CHECKING
 
@@ -65,7 +64,7 @@ def _load_env(explicit: Optional[str] = None) -> Optional[Path]:
 
 #状態を受信するためのクラス
 class StateReceiver:
-    """Simple #state data-channel receiver using the Sora Python SDK."""
+    """Simple #ctrl data-channel receiver using the Sora Python SDK."""
 
     def __init__(
         self,
@@ -94,7 +93,6 @@ class StateReceiver:
         self._connected = threading.Event()
         self._closed = threading.Event()
         self._ctrl_ready = threading.Event()
-        self._state_ready = threading.Event()
         self._lock = threading.Lock()
 
     # Soraに接続して状態受信を開始するメソッド
@@ -113,8 +111,7 @@ class StateReceiver:
             video=True,
             data_channel_signaling=True,
             data_channels=[
-                {"label": self.ctrl_label, "direction": "sendonly", "ordered": True},
-                {"label": self.state_label, "direction": "recvonly", "ordered": True},
+                {"label": self.ctrl_label, "direction": "recvonly", "ordered": True},
             ],
         )
 
@@ -169,108 +166,44 @@ class StateReceiver:
             LOGGER.debug("notify: %s", data)
 
     def _on_data_channel(self, label: str) -> None:
-        if label == self.state_label:
-            LOGGER.info("state channel ready: %s", label)
-            self._state_ready.set()
-        elif label == self.ctrl_label:
-            LOGGER.info("ctrl channel ready (unused): %s", label)
+        if label == self.ctrl_label:
+            LOGGER.info("ctrl channel ready: %s", label)
             self._ctrl_ready.set()
         else:
             LOGGER.info("datachannel event: %s", label)
 
     def _on_message(self, label: str, data: bytes) -> None:
-        if label != self.state_label:
+        if label != self.ctrl_label:
             return
 
         try:
             text = data.decode("utf-8")
         except UnicodeDecodeError:
-            LOGGER.warning("state message not utf-8; dropping")
+            LOGGER.warning("ctrl message not utf-8; dropping")
             return
 
         try:
             payload = json.loads(text)
         except json.JSONDecodeError:
-            LOGGER.warning("state message invalid JSON; dropping: %s", text)
+            LOGGER.warning("ctrl message invalid JSON; dropping: %s", text)
             return
 
         msg_type = str(payload.get("type") or payload.get("t") or "").lower()
         if msg_type == "hb":
-            LOGGER.debug("heartbeat received")
+            LOGGER.debug("heartbeat received on ctrl channel")
             return
-        if msg_type != "state":
+        if msg_type not in {"cmd", "ctrl"}:
             if self.debug:
-                LOGGER.debug("ignoring non-state payload: %s", payload)
+                LOGGER.debug("ignoring non-ctrl payload: %s", payload)
             return
 
-        seq = payload.get("seq")
-        sent_at_ms = payload.get("sent_at_ms")
-        pose = payload.get("pose") or {}
-        velocity = payload.get("velocity") or {}
-        status = payload.get("status") or {}
-        last_ctrl = payload.get("last_ctrl") or {}
-        LOGGER.info(
-            "state seq=%s sent_at_ms=%s pos=(%s,%s) heading=%s vel=(lin:%s,ang:%s) last_ctrl_seq=%s status=%s",
-            seq,
-            sent_at_ms,
-            pose.get("x"),
-            pose.get("y"),
-            pose.get("heading"),
-            velocity.get("linear"),
-            velocity.get("angular"),
-            last_ctrl.get("seq"),
-            status,
-        )
+        LOGGER.info("recv ctrl label=%s raw=%s", label, payload)
 
         if self._cmd_vel_subscriber is not None:
             try:
-                self._cmd_vel_subscriber.process_payload(payload)
+                self._cmd_vel_subscriber.process_ctrl_payload(payload)
             except Exception:  # noqa: BLE001
                 LOGGER.exception("failed to publish cmd_vel command")
-
-        timeline = payload.get("timeline")
-        if isinstance(timeline, dict):
-            timeline["pi_recv"] = int(time.time() * 1000.0)
-            seq_value = timeline.get("seq") or payload.get("seq")
-            ui_sent = timeline.get("ui_sent")
-            mgr_recv = timeline.get("mgr_recv")
-            mgr_sent = timeline.get("mgr_sent")
-            pi_recv = timeline.get("pi_recv")
-
-            def _delta_ms(start, end) -> Optional[int]:
-                if isinstance(start, (int, float)) and isinstance(end, (int, float)):
-                    return int(end - start)
-                return None
-
-            #各時刻
-            relative_ui_mgr = _delta_ms(ui_sent, mgr_recv)
-            relative_ui_mgr_sent = _delta_ms(ui_sent, mgr_sent)
-            relative_ui_pi_recv = _delta_ms(ui_sent, pi_recv)
-            manager_prcessing= _delta_ms(mgr_recv, mgr_sent)
-            relative_mgr_rpirecv= _delta_ms(relative_ui_mgr_sent, relative_ui_pi_recv)
-
-            deltas: list[str] = []
-            if relative_ui_mgr is not None:
-                deltas.append(f"ui_mrgrcv={relative_ui_mgr}ms")
-            if relative_ui_mgr_sent is not None:
-                deltas.append(f"ui_mgrsent={relative_ui_mgr_sent}ms")
-            if relative_ui_pi_recv is not None:
-                deltas.append(f"ui_pirecv={relative_ui_pi_recv}ms")
-            if manager_prcessing is not None:
-                deltas.append(f"mgr_proc={manager_prcessing}ms")
-            if relative_mgr_rpirecv is not None:
-                deltas.append(f"mgr_pirecv={relative_mgr_rpirecv}ms")
-            # Keep raw timeline JSON for later analysis even if human-readable summary omits mgr→pi
-
-            try:
-                raw_json = json.dumps(timeline, separators=(",", ":"))
-            except TypeError:
-                raw_json = str(timeline)
-
-            if deltas:
-                LOGGER.info("TIMELINE seq=%s %s raw=%s", seq_value, " ".join(deltas), raw_json)
-            else:
-                LOGGER.info("TIMELINE %s", raw_json)
 
     def _on_disconnect(self, code: SoraSignalingErrorCode, msg: str) -> None:
         LOGGER.info("Sora disconnected: code=%s msg=%s", code, msg)
@@ -278,7 +211,7 @@ class StateReceiver:
 
 
 def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Raspberry Pi state receiver (Python)")
+    parser = argparse.ArgumentParser(description="Raspberry Pi ctrl receiver (Python)")
     parser.add_argument("--room", help="Override VITE_SORA_CHANNEL_ID")
     parser.add_argument("--dotenv", help="Explicit path to .env file")
     parser.add_argument("--metadata", help="Override SORA_METADATA JSON")
