@@ -13,6 +13,13 @@
       import './js/components/gamepad-controls.js';
       import './js/components/track-trail.js';
       import './js/app/bootstrap.js';
+
+      window.NET_CONFIG = {
+        ctrlTransport: 'webrtc',
+        // mqttUrl: 'ws://192.168.207.116:9001', // ブローカ（ラズパイ）のWSポートに合わせる
+        // mqttCtrlTopic: 'aframe/ctrl',
+      };
+
     </script>
 
     <!-- ▼ 一元パラメータ（ここだけ触ればOK） ▼ -->

@@ -1,6 +1,8 @@
 import { createCtrlSender } from './ctrl-sender.js';
 import { createSoraClient } from './sora-client.js';
 import { createStateReceiver } from './state-recv.js';
+import { WebRTCClientTransport } from './transport/webrtc-client.js';
+import { MQTTClientTransport } from './transport/mqtt-client.js';
 
 export function initNet({ getInput, onState, onStatus, configOverrides = {} } = {}) {
   const jetsonConfig = typeof window !== 'undefined' ? window.JetsonConfig : null;
@@ -30,18 +32,40 @@ export function initNet({ getInput, onState, onStatus, configOverrides = {} } = 
     config,
   };
 
+  const transportChoice = String(config.ctrlTransport || 'webrtc').toLowerCase();
   const hasCtrl = typeof getInput === 'function' && config.ctrlLabel;
   if (config.stateLabel) {
     client.registerChannel(config.stateLabel, { direction: 'recvonly' });
   }
-  if (hasCtrl) {
+  if (hasCtrl && transportChoice === 'webrtc') {
     client.registerChannel(config.ctrlLabel, { direction: 'sendonly' });
   }
 
   let ctrlSender = null;
   if (hasCtrl) {
+    let ctrlTransport = null;
+    if (transportChoice === 'mqtt') {
+      const mqttUrl = config.mqttUrl || config.mqttWsUrl || config.mqtt;
+      const mqttCtrlTopic = config.mqttCtrlTopic || 'aframe/ctrl';
+      ctrlTransport = new MQTTClientTransport({
+        url: mqttUrl,
+        topic: mqttCtrlTopic,
+        qos: Number(config.mqttCtrlQos || 1),
+        debug: config.debug,
+        username: config.mqttUsername,
+        password: config.mqttPassword,
+      });
+      ctrlTransport.start();
+    } else {
+      ctrlTransport = new WebRTCClientTransport({
+        client,
+        label: config.ctrlLabel,
+        debug: config.debug,
+      });
+    }
+
     ctrlSender = createCtrlSender({
-      client,
+      transport: ctrlTransport,
       label: config.ctrlLabel,
       getInput,
       debug: config.debug,
@@ -143,4 +167,3 @@ export { createSoraClient, createCtrlSender, createStateReceiver };
 if (typeof window !== 'undefined') {
   window.initNet = initNet;
 }
-
