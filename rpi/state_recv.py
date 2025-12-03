@@ -9,13 +9,12 @@ import signal
 import sys
 import threading
 from pathlib import Path
-from typing import Iterable, List, Optional, TYPE_CHECKING
+from typing import List, Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from bridge import CommandSubscriber
 
 from dotenv import load_dotenv
-from sora_sdk import Sora, SoraConnection, SoraSignalingErrorCode
 
 LOGGER = logging.getLogger("state-recv")
 
@@ -62,153 +61,6 @@ def _load_env(explicit: Optional[str] = None) -> Optional[Path]:
     load_dotenv()
     return None
 
-#状態を受信するためのクラス
-class StateReceiver:
-    """Simple #ctrl data-channel receiver using the Sora Python SDK."""
-
-    def __init__(
-        self,
-        signaling_urls: Iterable[str],
-        channel_id: str,
-        ctrl_label: str,
-        state_label: str,
-        *,
-        metadata: Optional[dict] = None,
-        debug: bool = False,
-        connect_timeout: float = 10.0,
-        cmd_vel_subscriber: Optional["CommandSubscriber"] = None,
-    ) -> None:
-        self.signaling_urls = list(signaling_urls)
-        self.channel_id = channel_id
-        self.ctrl_label = ctrl_label
-        self.state_label = state_label
-        self.metadata = metadata
-        self.debug = debug
-        self.connect_timeout = connect_timeout
-        self._cmd_vel_subscriber = cmd_vel_subscriber
-
-        self._sora = Sora()
-        self._conn: Optional[SoraConnection] = None
-
-        self._connected = threading.Event()
-        self._closed = threading.Event()
-        self._ctrl_ready = threading.Event()
-        self._lock = threading.Lock()
-
-    # Soraに接続して状態受信を開始するメソッド
-    def connect(self) -> None:
-        if not self.signaling_urls:
-            raise ValueError("signaling_urls must not be empty")
-
-        LOGGER.info("connecting to Sora: urls=%s channel=%s", self.signaling_urls, self.channel_id)
-
-        conn = self._sora.create_connection(
-            signaling_urls=self.signaling_urls,
-            role="sendrecv",
-            channel_id=self.channel_id,
-            metadata=self.metadata,
-            audio=False,
-            video=True,
-            data_channel_signaling=True,
-            data_channels=[
-                {"label": self.ctrl_label, "direction": "recvonly", "ordered": True},
-            ],
-        )
-
-        conn.on_set_offer = self._on_set_offer
-        conn.on_notify = self._on_notify
-        conn.on_data_channel = self._on_data_channel
-        conn.on_message = self._on_message
-        conn.on_disconnect = self._on_disconnect
-
-        with self._lock:
-            self._conn = conn
-
-        conn.connect()
-
-        if not self._connected.wait(timeout=self.connect_timeout):
-            raise TimeoutError("Sora connection timeout")
-        LOGGER.info("Sora connected")
-
-    def wait_forever(self) -> None:
-        try:
-            self._closed.wait()
-        finally:
-            self.disconnect()
-
-    def disconnect(self) -> None:
-        with self._lock:
-            conn = self._conn
-            self._conn = None
-        if conn is not None:
-            try:
-                conn.disconnect()
-            except Exception:  # noqa: BLE001
-                LOGGER.debug("disconnect raised", exc_info=True)
-
-    # ------------------------------------------------------------------ Callbacks
-    def _on_set_offer(self, raw: str) -> None:
-        if self.debug:
-            LOGGER.debug("set_offer: %s", raw)
-
-    def _on_notify(self, raw: str) -> None:
-        try:
-            data = json.loads(raw)
-        except json.JSONDecodeError:
-            LOGGER.warning("notify: could not decode JSON: %s", raw)
-            return
-
-        event_type = data.get("event_type")
-        if data.get("type") == "notify" and event_type == "connection.created":
-            LOGGER.info("connection created: connection_id=%s", data.get("connection_id"))
-            self._connected.set()
-        elif self.debug:
-            LOGGER.debug("notify: %s", data)
-
-    def _on_data_channel(self, label: str) -> None:
-        if label == self.ctrl_label:
-            LOGGER.info("ctrl channel ready: %s", label)
-            self._ctrl_ready.set()
-        else:
-            LOGGER.info("datachannel event: %s", label)
-
-    def _on_message(self, label: str, data: bytes) -> None:
-        if label != self.ctrl_label:
-            return
-
-        try:
-            text = data.decode("utf-8")
-        except UnicodeDecodeError:
-            LOGGER.warning("ctrl message not utf-8; dropping")
-            return
-
-        try:
-            payload = json.loads(text)
-        except json.JSONDecodeError:
-            LOGGER.warning("ctrl message invalid JSON; dropping: %s", text)
-            return
-
-        msg_type = str(payload.get("type") or payload.get("t") or "").lower()
-        if msg_type == "hb":
-            LOGGER.debug("heartbeat received on ctrl channel")
-            return
-        if msg_type not in {"cmd", "ctrl"}:
-            if self.debug:
-                LOGGER.debug("ignoring non-ctrl payload: %s", payload)
-            return
-
-        LOGGER.info("recv ctrl label=%s raw=%s", label, payload)
-
-        if self._cmd_vel_subscriber is not None:
-            try:
-                self._cmd_vel_subscriber.process_ctrl_payload(payload)
-            except Exception:  # noqa: BLE001
-                LOGGER.exception("failed to publish cmd_vel command")
-
-    def _on_disconnect(self, code: SoraSignalingErrorCode, msg: str) -> None:
-        LOGGER.info("Sora disconnected: code=%s msg=%s", code, msg)
-        self._closed.set()
-
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Raspberry Pi ctrl receiver (Python)")
@@ -218,6 +70,17 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--log-level", default="INFO", help="Logging level (default: INFO)")
     parser.add_argument("--debug", action="store_true", help="Enable verbose Sora logging")
     parser.add_argument("--connect-timeout", type=float, default=10.0, help="Connection timeout (seconds)")
+    parser.add_argument(
+        "--transport",
+        choices=["webrtc", "mqtt"],
+        help="Transport strategy for ctrl input (default: webrtc)",
+    )
+    parser.add_argument("--mqtt-host", help="MQTT broker host (env: MQTT_HOST)")
+    parser.add_argument("--mqtt-port", type=int, help="MQTT broker port (env: MQTT_PORT, default 1883)")
+    parser.add_argument("--mqtt-ctrl-topic", help="MQTT ctrl topic (env: MQTT_CTRL_TOPIC, default aframe/ctrl)")
+    parser.add_argument("--mqtt-username", help="MQTT username (env: MQTT_USERNAME)")
+    parser.add_argument("--mqtt-password", help="MQTT password (env: MQTT_PASSWORD)")
+    parser.add_argument("--mqtt-keepalive", type=int, help="MQTT keepalive seconds (env: MQTT_KEEPALIVE, default 60)")
     parser.add_argument(
         "--publish-cmd-vel",
         action="store_true",
@@ -256,9 +119,25 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _load_metadata(raw: Optional[str]) -> Optional[dict]:
+    if not raw:
+        return None
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"SORA_METADATA is invalid JSON: {exc}") from exc
+
+
+def _resolve_transport_choice(raw_choice: Optional[str]) -> str:
+    choice = (raw_choice or os.getenv("CONTROL_TRANSPORT") or "webrtc").lower()
+    if choice not in {"webrtc", "mqtt"}:
+        raise ValueError(f"Unsupported transport: {choice}")
+    return choice
+
+
 def main(argv: Optional[List[str]] = None) -> int:
-    parser = _build_parser()#構文解析器の作成
-    args = parser.parse_args(argv)#引数の解析
+    parser = _build_parser()
+    args = parser.parse_args(argv)
 
     logging.basicConfig(
         level=getattr(logging, str(args.log_level).upper(), logging.INFO),
@@ -269,21 +148,18 @@ def main(argv: Optional[List[str]] = None) -> int:
     if loaded_env:
         LOGGER.info("loaded environment from %s", loaded_env)
 
-    signaling_urls = _parse_signaling_urls(os.getenv("VITE_SORA_SIGNALING_URLS"))
-    if not signaling_urls:
-        parser.error("VITE_SORA_SIGNALING_URLS is required")
-
-    channel_id = args.room or os.getenv("VITE_SORA_CHANNEL_ID") or "sora"
-    ctrl_label = _normalise_label(os.getenv("VITE_CTRL_LABEL"), "#ctrl")
-    state_label = _normalise_label(os.getenv("VITE_STATE_LABEL"), "#state")
+    try:
+        transport_choice = _resolve_transport_choice(args.transport)
+    except ValueError as exc:
+        parser.error(str(exc))
+        return 1
 
     metadata_raw = args.metadata or os.getenv("SORA_METADATA")
-    metadata = None
-    if metadata_raw:
-        try:
-            metadata = json.loads(metadata_raw)
-        except json.JSONDecodeError as exc:
-            parser.error(f"SORA_METADATA is invalid JSON: {exc}")
+    try:
+        metadata = _load_metadata(metadata_raw)
+    except ValueError as exc:
+        parser.error(str(exc))
+        return 1
 
     cmd_vel_publisher = None
     cmd_vel_subscriber: Optional["CommandSubscriber"] = None
@@ -323,35 +199,91 @@ def main(argv: Optional[List[str]] = None) -> int:
             LOGGER.error("could not initialize cmd_vel bridge: %s", exc)
             return 1
 
-    receiver = StateReceiver(
-        signaling_urls=signaling_urls,
-        channel_id=channel_id,
-        ctrl_label=ctrl_label,
-        state_label=state_label,
-        metadata=metadata,
-        debug=args.debug,
-        connect_timeout=args.connect_timeout,
-        cmd_vel_subscriber=cmd_vel_subscriber,
-    )
+    transport = None
+    if transport_choice == "mqtt":
+        try:
+            try:
+                from .transport.mqtt_server import MQTTServerTransport
+            except ImportError:
+                from transport.mqtt_server import MQTTServerTransport  # type: ignore[assignment]
+        except ImportError as exc:
+            parser.error(f"MQTT transport unavailable: {exc}")
+
+        host = args.mqtt_host or os.getenv("MQTT_HOST")
+        if not host:
+            parser.error("MQTT_HOST is required when transport=mqtt")
+
+        port_raw = args.mqtt_port or os.getenv("MQTT_PORT") or 1883
+        port = int(port_raw)
+        ctrl_topic = args.mqtt_ctrl_topic or os.getenv("MQTT_CTRL_TOPIC") or "aframe/ctrl"
+        username = args.mqtt_username or os.getenv("MQTT_USERNAME")
+        password = args.mqtt_password or os.getenv("MQTT_PASSWORD")
+        keepalive_raw = args.mqtt_keepalive or os.getenv("MQTT_KEEPALIVE") or 60
+        keepalive = int(keepalive_raw)
+
+        transport = MQTTServerTransport(
+            broker_host=host,
+            broker_port=port,
+            ctrl_topic=ctrl_topic,
+            username=username,
+            password=password,
+            keepalive=keepalive,
+            connect_timeout=args.connect_timeout,
+        )
+    else:
+        try:
+            try:
+                from .transport.webrtc_server import WebRTCServerTransport
+            except ImportError:
+                from transport.webrtc_server import WebRTCServerTransport  # type: ignore[assignment]
+        except ImportError as exc:
+            parser.error(f"WebRTC transport unavailable: {exc}")
+
+        signaling_urls = _parse_signaling_urls(os.getenv("VITE_SORA_SIGNALING_URLS"))
+        if not signaling_urls:
+            parser.error("VITE_SORA_SIGNALING_URLS is required for WebRTC transport")
+
+        channel_id = args.room or os.getenv("VITE_SORA_CHANNEL_ID") or "sora"
+        ctrl_label = _normalise_label(os.getenv("VITE_CTRL_LABEL"), "#ctrl")
+
+        transport = WebRTCServerTransport(
+            signaling_urls=signaling_urls,
+            channel_id=channel_id,
+            ctrl_label=ctrl_label,
+            metadata=metadata,
+            debug=args.debug,
+            connect_timeout=args.connect_timeout,
+        )
+
+    stop_event = threading.Event()
 
     def _handle_signal(signum: int, _frame) -> None:
         LOGGER.info("signal received: %s; shutting down", signum)
-        receiver.disconnect()
-        receiver._closed.set()
+        stop_event.set()
 
     signal.signal(signal.SIGINT, _handle_signal)
     signal.signal(signal.SIGTERM, _handle_signal)
 
+    def _log_only_ctrl(payload: dict) -> None:
+        LOGGER.info("ctrl payload received (no cmd_vel handler): %s", payload)
+
+    transport.on_ctrl(cmd_vel_subscriber.process_ctrl_payload if cmd_vel_subscriber else _log_only_ctrl)
+
     try:
-        receiver.connect()
-        receiver.wait_forever()
+        transport.connect()
+        LOGGER.info("ctrl transport started via %s", transport_choice)
+
+        while not stop_event.wait(timeout=0.2):
+            if transport.is_closed():
+                LOGGER.info("transport reported closed; exiting")
+                break
     except TimeoutError as exc:
         LOGGER.error("%s", exc)
         return 1
     except KeyboardInterrupt:
         LOGGER.info("interrupted by user")
     finally:
-        receiver.disconnect()
+        transport.close()
         if cmd_vel_subscriber is not None:
             cmd_vel_subscriber.close()
         if cmd_vel_publisher is not None:

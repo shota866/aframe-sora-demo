@@ -8,6 +8,7 @@
   "dependencies": {
     "@c-frame/aframe-physics-system": "^4.2.3",
     "aframe": "^1.5.0",
+    "mqtt": "^5.14.1",
     "sora-js-sdk": "^2023.2.0"
   },
   "devDependencies": {

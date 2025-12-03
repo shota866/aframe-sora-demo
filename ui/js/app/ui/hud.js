@@ -13,6 +13,9 @@ export function createHud() {
     if (!labelEl) return;
     const status =
       level === 'connected' ? 'connected' : level === 'degraded' ? 'degraded' : 'disconnected';
+    if (window?.NET_DEBUG) {
+      console.info('[hud] setConnection', { level, details, status });
+    }
     labelEl.dataset.level = status;
     labelEl.textContent = status.toUpperCase();
     if (detailEl) detailEl.textContent = formatDetail(details);

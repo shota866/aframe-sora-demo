@@ -9,11 +9,11 @@ function clamp(value, min, max) {
 
 class CtrlSender {
   constructor(options = {}) {
-    const { client, label, getInput, onMetrics, debug = false } = options;
-    if (!client) throw new Error('CtrlSender requires a Sora client');
+    const { transport, label, getInput, onMetrics, debug = false } = options;
+    if (!transport) throw new Error('CtrlSender requires a transport');
     if (!label) throw new Error('CtrlSender requires a ctrl label');
     if (typeof getInput !== 'function') throw new Error('CtrlSender requires getInput function');
-    this.client = client;
+    this.transport = transport;
     this.label = label;
     this.getInput = getInput;
     this._onMetrics = onMetrics;
@@ -31,8 +31,8 @@ class CtrlSender {
     this._onOpen = this._handleOpen.bind(this);
     this._onClose = this._handleClose.bind(this);
 
-    client.on('channel-open', this._onOpen);
-    client.on('channel-close', this._onClose);
+    transport.on('channel-open', this._onOpen);
+    transport.on('channel-close', this._onClose);
   }
 
   start() {
@@ -49,8 +49,11 @@ class CtrlSender {
       window.cancelAnimationFrame(this._rafId);
       this._rafId = null;
     }
-    this.client.off('channel-open', this._onOpen);
-    this.client.off('channel-close', this._onClose);
+    this.transport.off('channel-open', this._onOpen);
+    this.transport.off('channel-close', this._onClose);
+    if (typeof this.transport.stop === 'function') {
+      this.transport.stop();
+    }
   }
 
   forceBrake() {
@@ -143,9 +146,8 @@ class CtrlSender {
   _maybeSendHeartbeat(now) {
     if (!this._channelOpen) return;
     if (now - this._lastHeartbeatAt < KEEPALIVE_MS) return;
-    if (this.client.sendJson(this.label, { type: 'hb', role: 'ui', t: Date.now() })) {
-      this._lastHeartbeatAt = now;
-    }
+    const ok = this.transport.sendCtrl({ type: 'hb', role: 'ui', t: Date.now() });
+    if (ok) this._lastHeartbeatAt = now;
   }
 
   _send(payload, isOverride) {
@@ -164,7 +166,7 @@ class CtrlSender {
       device: payload.device,
       override: !!isOverride,
     };
-    const ok = this.client.sendJson(this.label, message);
+    const ok = this.transport.sendCtrl(message);
     if (ok && this.debug) console.debug('[ctrl] sendCtrl', message);
     console.info('[ctrl/send] sending', { ok, message });
   }
