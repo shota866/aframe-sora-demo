@@ -158,12 +158,6 @@ class Conductor:
                 velocity.get("linear"),
                 velocity.get("angular"),
             )
-        timeline = obj.get("timeline")
-        if isinstance(timeline, dict):
-            seq_value = obj.get("seq")
-            if seq_value is not None and "seq" not in timeline:
-                timeline["seq"] = seq_value
-            timeline["mgr_sent"] = int(time.time() * 1000.0)
         payload_json = json.dumps(obj, separators=(",", ":"))
         preview = payload_json
         if len(preview) > 512:

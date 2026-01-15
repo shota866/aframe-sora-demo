@@ -31,12 +31,10 @@ class StatePayloadBuilder:
         self._estop_state = estop_state
         self._state_seq = 0
         self._last_idle_state_emit = 0.0
-        self._last_timeline_seq: Optional[int] = None
 
     def reset(self) -> None:
         self._state_seq = 0
         self._last_idle_state_emit = 0.0
-        self._last_timeline_seq = None
     #状態ペイロードを構築するメソッド
     def build(self) -> Dict[str, object]:
         with self._vehicle_lock:
@@ -104,10 +102,6 @@ class StatePayloadBuilder:
         if last_ctrl_payload:
             payload["last_ctrl"] = last_ctrl_payload
 
-        timeline_payload = self._build_timeline_payload(last_ctrl_snapshot)
-        if timeline_payload:
-            payload["timeline"] = timeline_payload
-
         return payload
     
     def _next_state_seq(self) -> int:
@@ -153,24 +147,3 @@ class StatePayloadBuilder:
             payload["latency_ms"] = latency_ms
 
         return payload
-
-    def _build_timeline_payload(
-        self,
-        snapshot: Optional[ControlSnapshot],
-    ) -> Optional[Dict[str, int]]:
-        if snapshot is None:
-            return None
-
-        if self._last_timeline_seq == snapshot.seq:
-            return None
-
-        timeline: Dict[str, int] = {"seq": snapshot.seq}
-        if snapshot.client_timestamp_ms is not None:
-            timeline["ui_sent"] = int(snapshot.client_timestamp_ms)
-        if snapshot.manager_recv_at_ms is not None:
-            timeline["mgr_recv"] = int(snapshot.manager_recv_at_ms)
-        if len(timeline) == 1:
-            return None
-
-        self._last_timeline_seq = snapshot.seq
-        return timeline
