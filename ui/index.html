@@ -196,8 +196,8 @@
       <!-- 地面 & 空 -->
       <a-plane
         rotation="-90 0 0"
-        width="80"
-        height="80"
+        width="150"
+        height="150"
         color="#ccc"
         static-body="shape: plane"
       ></a-plane>
@@ -205,8 +205,11 @@
 
       <!-- ポイントクラウドマップ -->
       <a-gltf-model
+        src="assets/kenney_car-kit/solar.glb"
         src="assets/kenney_car-kit/MapViewer3Dpts_out_normal_white_200mm.glb"
-        rotation="-90 0 0"
+        
+        rotation="0 180 0"
+        position="0 1 0"
       ></a-gltf-model>
 
       <!-- 車の軌跡を描画するエンティティ -->
