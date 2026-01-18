@@ -33,6 +33,7 @@ class CommandSubscriber:
         self._watchdog_thread.start()
 
     def process_ctrl_payload(self, payload: Dict[str, object]) -> None:
+        self.get_logger().info("Processing ctrl payload: %s", payload)
         """
         Handle UI -> rpi ctrl payloads.
         Expected shape: {"t":"ctrl","seq":123,"command":"UP"} or

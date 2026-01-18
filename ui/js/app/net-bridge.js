@@ -112,8 +112,8 @@ export function createNetBridge({ config, hud, controlLog, carEl }) {
       metrics.latencyMs = performance.now() - metrics.lastCtrlAt;
     }
     hud.setMetrics(metrics);
-    hud.setPose(state);
-    applyServerState(carEl, state);
+   hud.setPose(state);
+    // applyServerState(carEl, state);
     controlLog.state({ metrics, state });
   });
 
